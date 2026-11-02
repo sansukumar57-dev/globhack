@@ -21,6 +21,10 @@ logs/
 
 # OS / editor
 .DS_Store
+
+# Hackathon artifacts
+files.zip
+test_ws.txt
 Thumbs.db
 .vscode/
 .idea/
