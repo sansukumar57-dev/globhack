@@ -19,6 +19,9 @@ dist-ssr/
 *.log
 logs/
 
+# QA screenshot artifacts
+artifacts/
+
 # OS / editor
 .DS_Store
 
@@ -28,3 +31,10 @@ test_ws.txt
 Thumbs.db
 .vscode/
 .idea/
+
+# Local AI gateway state (Bifrost) — SQLite stores hold request logs and
+# runtime config; never commit them. The gateway's config.json is tracked
+# (it references env vars, not secrets).
+*.db
+*.db-shm
+*.db-wal
