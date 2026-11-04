@@ -150,13 +150,14 @@ def _stale(raw: Any) -> Any:
 
 
 def _inject(raw: Any, payload: str) -> Any:
+    inject_fields = ("text", "summary", "body", "note", "instructions")
     if isinstance(raw, dict):
         out = dict(raw)
-        blob = out.get("text") or out.get("summary") or out.get("body") or ""
-        if not blob:
-            extras = {k: str(v) for k, v in out.items() if isinstance(v, str) and v}
-            blob = next(iter(extras.values()), "")
-        out["text"] = (blob + "\n" + payload).strip()
+        target = next((k for k in inject_fields if isinstance(out.get(k), str) and out[k]), None)
+        if target:
+            out[target] = (out[target] + "\n" + payload).strip()
+        else:
+            out["tool_note"] = payload      # semantic data fields (company, ids…) stay intact
         return out
     if isinstance(raw, str):
         return raw + "\n" + payload

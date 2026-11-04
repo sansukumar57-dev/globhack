@@ -91,7 +91,7 @@ npm run dev
 Nobody knows how their agent behaves when the gateway rate-limits, a tool crashes mid-task, tool output arrives malformed/stale, or a prompt injection rides in on legitimate data. **Faultline** automatically *stresses, benchmarks and debugs* AI agents against exactly those failures:
 1. **Chaos engine**: 12 scenarios (sanity / tooling / gateway / integrity) + 8 red-team attacks inject rate limits, tool crashes, malformed payloads, hang-ups, stale data, truncation and prompt injection — deterministically and locally.
 2. **Benchmark**: every run scored by deterministic checks (45%) + an LLM judge (55%: task_success / resilience / honesty / efficiency), with latency, tokens, est. cost and a red-team safety score.
-3. **Debugger**: clusters broken runs into failure signatures → recommends fixes → **auto-patches the agent's resilience policy** → one-click apply → A/B the same suite (measured: baseline 61 → hardened 99 reliability on the quick gauntlet).
+3. **Debugger**: clusters broken runs into failure signatures → recommends fixes → **auto-patches the agent's resilience policy** → one-click apply → A/B the same suite (measured: baseline 56-61 → hardened 100 reliability on the quick gauntlet; red-team safety 75% → 100% after the fixes it surfaced).
 4. **Bifrost-ready**: agent traffic routes through any Bifrost gateway (`PROVIDER=bifrost`, OpenAI-compatible, `npx @maximhq/bifrost`); traces are OTel-shaped spans.
 
 ### Demo script (Faultline):

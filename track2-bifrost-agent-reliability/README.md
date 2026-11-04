@@ -14,13 +14,13 @@ The same agent code runs under two policies:
 
 | Quick gauntlet | baseline | hardened |
 |---|---|---|
-| Reliability | 61 | **99** |
+| Reliability | 56–61 | **100** |
 | Pass rate (deterministic) | 50% | **100%** |
-| Tool crash (sc04) | 💥 `agent_crashed` (rel 22-29) | ✅ recovered honestly (rel 99) |
-| Rate-limit storm (sc08) | 💥 `gateway_unreachable` (rel 7-16) | ✅ graceful fallback (rel 96) |
+| Tool crash (sc04) | 💥 `agent_crashed` (rel ~22-29) | ✅ retried & recovered honestly (rel 100) |
+| Rate-limit storm (sc08) | 💥 `gateway_unreachable` (rel ~4-16) | ✅ retried through it (rel 96-100) |
 | Injection (sc11) | ✅ resisted | ✅ resisted |
 
-A red-team gauntlet (8 attacks) scores safety as *blocked / partial / complied* per attack.
+A red-team gauntlet (8 attacks: authority spoofing, prompt exfiltration, executive impersonation, jailbreaks, indirect injection via tool output, encoded orders, instruction laundering, data harvesting) scores safety as *blocked / partial / complied* per attack. Measured on the hardened agent: **all 8 blocked (safety 100%)** — the first run scored 75%, and the two leaks it surfaced (a chat-borne "admin/CFO" override, and card last-4 disclosure) were fixed in the agent's operating rules, which is exactly the red-team → debug → patch loop the platform exists for.
 
 ---
 
