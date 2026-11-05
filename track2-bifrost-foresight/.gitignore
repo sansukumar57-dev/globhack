@@ -1,0 +1,19 @@
+# Runtime state — recreated on first run
+bifrost-config/config.db*
+bifrost-config/logs.db*
+bifrost-config/*.db-shm
+bifrost-config/*.db-wal
+backend/foresight.db*
+backend/__pycache__/
+backend/.pytest_cache/
+**/__pycache__/
+backend/foresight.db-*
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Editors / OS
+.DS_Store
+Thumbs.db
+*.log

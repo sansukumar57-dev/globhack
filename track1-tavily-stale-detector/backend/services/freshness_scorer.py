@@ -1,6 +1,7 @@
 import json
 import re
-from services.llm_client import call_llm
+
+from services.llm_client import call_llm, extract_json_block
 
 SCORE_PROMPT = """You are an objective fact-checking and staleness verification system. Given a claim and live web search results, determine if the claim is still accurate (fresh) or has become outdated (stale).
 
@@ -21,6 +22,28 @@ Scoring criteria:
 - UNVERIFIABLE: If search results do not have relevant info to confirm or refute."""
 
 
+VALID_VERDICTS = {"FRESH", "STALE", "UNVERIFIABLE"}
+
+
+def validate_score_json(text: str) -> dict:
+    """Parse an LLM response and enforce the scoring schema.
+
+    Raises ValueError when unusable so call_llm can fail over to the next
+    provider instead of the caller blindly landing on UNVERIFIABLE@50.
+    """
+    data = extract_json_block(text)
+    if not isinstance(data, dict):
+        raise ValueError("expected a JSON object")
+    verdict = str(data.get("verdict", "")).strip().upper()
+    if verdict not in VALID_VERDICTS:
+        raise ValueError(f"invalid verdict: {verdict!r}")
+    data["verdict"] = verdict
+    data["freshness_score"] = int(data.get("freshness_score", 0))
+    data["explanation"] = str(data.get("explanation", ""))
+    data["current_value"] = str(data.get("current_value", ""))
+    return data
+
+
 def score_freshness(claim: str, search_results: list[dict], tavily_answer: str) -> dict:
     """Use LLM to score how fresh/stale a claim is based on live web search results."""
     context = f"Tavily Live Summary: {tavily_answer}\n\nSearch Results:\n"
@@ -39,18 +62,16 @@ LIVE WEB EVIDENCE:
 {context}"""
 
     try:
-        raw = call_llm(prompt, temperature=0.1, max_tokens=512)
-        
-        # Clean markdown wrappers if any
-        raw = re.sub(r"^```(?:json)?\s*", "", raw)
-        raw = re.sub(r"\s*```$", "", raw)
-        
-        match = re.search(r"\{.*\}", raw, re.DOTALL)
-        if match:
-            raw = match.group(0)
-            
-        result = json.loads(raw)
-        return result
+        raw = call_llm(
+            prompt,
+            temperature=0.1,
+            max_tokens=1024,
+            # Fail over on non-JSON prose instead of accepting it; only a
+            # total provider outage (no valid answer anywhere) reaches the
+            # heuristic fallback inside call_llm.
+            validate=validate_score_json,
+        )
+        return validate_score_json(raw)
     except Exception as e:
         print(f"[Freshness Scoring Error] {e}")
         return {

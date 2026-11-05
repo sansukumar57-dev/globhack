@@ -1,0 +1,82 @@
+{
+  "$schema": "https://www.getbifrost.ai/schema",
+  "encryption_key": "foresight-demo-encryption-key-not-for-production",
+  "client": {
+    "enable_logging": true,
+    "enforce_auth_on_inference": true,
+    "initial_pool_size": 50
+  },
+  "providers": {
+    "acme-llm": {
+      "custom_provider_config": { "base_provider_type": "openai" },
+      "network_config": {
+        "base_url": "http://localhost:9100",
+        "default_request_timeout_in_seconds": 30,
+        "max_retries": 0
+      },
+      "keys": [
+        {
+          "name": "acme-demo-key",
+          "value": "demo-upstream-key",
+          "models": ["*"],
+          "weight": 1.0
+        }
+      ]
+    }
+  },
+  "governance": {
+    "virtual_keys": [
+      {
+        "id": "vk-growth",
+        "name": "Growth Backend · prod",
+        "value": "sk-bf-foresight-growth-0001",
+        "is_active": true,
+        "team_id": "team-platform",
+        "provider_configs": [
+          { "provider": "acme-llm", "allowed_models": ["*"], "key_ids": ["*"], "weight": 1 }
+        ]
+      },
+      {
+        "id": "vk-support",
+        "name": "Support Agent Fleet",
+        "value": "sk-bf-foresight-support-0002",
+        "is_active": true,
+        "team_id": "team-support",
+        "provider_configs": [
+          { "provider": "acme-llm", "allowed_models": ["*"], "key_ids": ["*"], "weight": 1 }
+        ]
+      },
+      {
+        "id": "vk-staging",
+        "name": "Staging CI",
+        "value": "sk-bf-foresight-staging-0003",
+        "is_active": true,
+        "team_id": "team-platform",
+        "provider_configs": [
+          { "provider": "acme-llm", "allowed_models": ["*"], "key_ids": ["*"], "weight": 1 }
+        ]
+      },
+      {
+        "id": "vk-sandbox",
+        "name": "Hackathon Sandbox",
+        "value": "sk-bf-foresight-sandbox-0004",
+        "is_active": true,
+        "team_id": "team-rnd",
+        "provider_configs": [
+          { "provider": "acme-llm", "allowed_models": ["*"], "key_ids": ["*"], "weight": 1 }
+        ]
+      }
+    ],
+    "teams": [
+      { "id": "team-platform", "name": "Platform" },
+      { "id": "team-support", "name": "Support" },
+      { "id": "team-rnd", "name": "R&D" }
+    ],
+    "budgets": [
+      { "id": "budget-growth-30d", "max_limit": 500.0, "reset_duration": "1M", "virtual_key_id": "vk-growth" },
+      { "id": "budget-support-30d", "max_limit": 800.0, "reset_duration": "1M", "virtual_key_id": "vk-support" },
+      { "id": "budget-staging-30d", "max_limit": 150.0, "reset_duration": "1M", "virtual_key_id": "vk-staging" },
+      { "id": "budget-sandbox-30d", "max_limit": 50.0, "reset_duration": "1M", "virtual_key_id": "vk-sandbox" }
+    ]
+  }
+}
