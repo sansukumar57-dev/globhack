@@ -100,6 +100,11 @@ client.chat.completions.create(model="acme-llm/gpt-4o", messages=[{"role": "user
 | **Live Traffic** | Metered request stream (auto-refresh) + “Fire 8 live requests” to watch tokens land in real time |
 | **Autopilot** | Webhook URL, soft-cap fraction, horizon, anomaly z, pacing window; test-fire the webhook; inspect the built-in webhook sink |
 
+![Overview](docs/screenshots/overview.png)
+![Virtual keys](docs/screenshots/keys.png)
+![Anomalies](docs/screenshots/anomalies.png)
+![Right-sizing](docs/screenshots/simulator.png)
+
 ## How the forecast works
 
 - **Rolling 30-day windows**, same semantics as Bifrost's `reset_duration` budgets.

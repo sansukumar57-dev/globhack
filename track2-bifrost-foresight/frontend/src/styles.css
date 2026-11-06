@@ -6,7 +6,7 @@
   --panel-3: #1a1f47;
   --border: rgba(148, 163, 255, 0.10);
   --border-strong: rgba(148, 163, 255, 0.22);
-  --text: #eceefs;
+  --text: #e9ecf8;
   --muted: #8b91b8;
   --muted-2: #5d628f;
   --violet: #7c5cff;
@@ -152,8 +152,8 @@ body {
 .budget-item { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px; background: rgba(11, 14, 34, 0.5); }
 .budget-head { display: flex; align-items: center; gap: 10px; }
 .key-dot { width: 10px; height: 10px; border-radius: 3px; flex: none; }
-.budget-name { font-size: 13px; font-weight: 600; }
-.budget-team { font-size: 11px; color: var(--muted-2); }
+.budget-name { font-size: 13px; font-weight: 600; color: var(--text); }
+.budget-team { font-size: 11px; color: var(--muted); }
 .budget-meta { margin-left: auto; display: flex; align-items: center; gap: 10px; }
 .budget-spent { font-size: 12px; color: var(--muted); }
 .budget-spent b { color: var(--text); }
@@ -179,7 +179,7 @@ body {
 .keys-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; align-items: start; }
 .key-card { padding: 18px; display: flex; flex-direction: column; gap: 12px; }
 .key-head { display: flex; align-items: flex-start; gap: 10px; }
-.key-title { font-size: 15px; font-weight: 700; letter-spacing: -0.01em; }
+.key-title { font-size: 15px; font-weight: 700; letter-spacing: -0.01em; color: var(--text); }
 .key-vk { font-size: 10.5px; color: var(--muted-2); margin-top: 3px; letter-spacing: 0.04em; }
 .key-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
 .key-stat { background: rgba(11, 14, 34, 0.5); border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; }

@@ -50,7 +50,7 @@ export default function Settings({ refreshKey }) {
         <div className="field">
           <label className="control-label" htmlFor="webhook">Alert webhook URL</label>
           <input id="webhook" className="mono" type="text" value={settings.webhook_url || ''} onChange={set('webhook_url')} placeholder="https://hooks.slack.com/services/…" />
-          <div style={{ fontSize: 10.5, color: 'var(--muted-2)' }}>Default: the built-in sink at <span className="mono">http://localhost:8400/api/webhook-sink</span> — Slack-compatible JSON.</div>
+          <div style={{ fontSize: 10.5, color: 'var(--muted-2)' }}>Default: the built-in sink at <span className="mono">http://127.0.0.1:8400/api/webhook-sink</span> — Slack-compatible JSON.</div>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
