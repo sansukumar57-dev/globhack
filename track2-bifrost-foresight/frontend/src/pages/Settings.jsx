@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { BellRing, CheckCircle2, Inbox, Loader2, Save, Trash2 } from 'lucide-react'
-import { api, timeAgo, toast } from '../api'
+import { BellRing, CheckCircle2, Inbox, Loader2, RefreshCw, Save, Trash2 } from 'lucide-react'
+import { api, fmtUsd, timeAgo, toast } from '../api'
 import { EmptyState, Loading, PageHeader } from '../components/ui'
 
 const CURL = `curl "$FORESIGHT/v1/chat/completions" \\
@@ -14,6 +14,13 @@ function prettyBody(body) {
   } catch {
     return body
   }
+}
+
+function fmtBytes(bytes) {
+  if (bytes == null) return '—'
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
 }
 
 function CodeBlock({ label, code, onCopy }) {
@@ -34,16 +41,23 @@ function CodeBlock({ label, code, onCopy }) {
 export default function Settings({ refreshKey }) {
   const [settings, setSettings] = useState({})
   const [sink, setSink] = useState([])
+  const [model, setModel] = useState(null)
   const [loading, setLoading] = useState(true)
   const [testResult, setTestResult] = useState(null)
   const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState(false)
+  const [training, setTraining] = useState(false)
 
   const load = useCallback(async () => {
     try {
-      const [s, k] = await Promise.all([api.getSettings(), api.sink()])
+      const [s, k, m] = await Promise.all([
+        api.getSettings(),
+        api.sink(),
+        api.model().catch(() => null),
+      ])
       setSettings(s.settings)
       setSink(k.sink)
+      setModel(m)
     } catch {
       /* the top bar surfaces connectivity */
     } finally {
@@ -52,6 +66,19 @@ export default function Settings({ refreshKey }) {
   }, [])
 
   useEffect(() => { load() }, [load, refreshKey])
+
+  const retrain = async () => {
+    setTraining(true)
+    try {
+      const res = await api.trainModel()
+      toast(`Model retrained · validation MAE $${(res.val_mae ?? 0).toFixed(2)}/h`)
+      await load()
+    } catch (e) {
+      toast(`Train failed: ${e.message}`)
+    } finally {
+      setTraining(false)
+    }
+  }
 
   const set = (key) => (e) => setSettings({ ...settings, [key]: e.target.value })
 
@@ -125,6 +152,65 @@ export default function Settings({ refreshKey }) {
 
       <div className="settings-grid">
         <div className="settings-main">
+          <section className="sheet">
+            <div className="sheet-head">
+              <div>
+                <h2 className="sheet-title">Forecast model</h2>
+                <p className="sheet-sub">
+                  {model?.loaded
+                    ? `Trained ${timeAgo(model.trained_at)} on this gateway's metered history`
+                    : 'Compact forecaster over this gateway’s metered history'}
+                </p>
+              </div>
+              <button className="btn btn-sm" onClick={retrain} disabled={training}>
+                {training ? <Loader2 className="spin" size={13} aria-hidden="true" /> : <RefreshCw size={13} aria-hidden="true" />}
+                Retrain on live data
+              </button>
+            </div>
+
+            {model?.loaded ? (
+              <div className="sheet-body">
+                <div className="tape three">
+                  <div className="tape-cell">
+                    <div className="tape-label">Validation MAE</div>
+                    <div className="tape-value">
+                      {model.val_mae != null ? fmtUsd(model.val_mae) : '—'}<span className="unit">/h</span>
+                    </div>
+                    <div className="tape-context">
+                      naive weekly same-hour <b>{model.baseline_mae != null ? fmtUsd(model.baseline_mae) : '—'}/h</b>
+                    </div>
+                  </div>
+                  <div className="tape-cell">
+                    <div className="tape-label">Artifact size</div>
+                    <div className="tape-value">{fmtBytes(model.artifact_bytes)}</div>
+                    <div className="tape-context">
+                      100 MB budget · <b>{model.under_budget ? 'within budget' : 'over budget'}</b>
+                    </div>
+                  </div>
+                  <div className="tape-cell">
+                    <div className="tape-label">Training rows</div>
+                    <div className="tape-value">{model.n_train != null ? model.n_train.toLocaleString() : '—'}</div>
+                    <div className="tape-context">
+                      {model.keys?.length ?? 0} keys · {model.hours_covered ?? '—'}h of history
+                    </div>
+                  </div>
+                </div>
+                <p className="field-hint" style={{ marginTop: 12 }}>
+                  Gradient-boosted trees over hour-of-day, day-of-week, per-key spend lags (1h/24h/168h)
+                  and rolling means. The trained artifact drives the <b>dashed next-12h projection</b> on the
+                  Overview chart; governance decisions keep the conservative statistical ETA.
+                </p>
+              </div>
+            ) : (
+              <div className="sheet-body">
+                <EmptyState
+                  title="No trained model yet."
+                  detail="Hit retrain to fit boosted trees on the live metering history — a tiny artifact (well under the 100 MB budget) that projects the next 12 hours on the Overview. Governance stays statistical either way."
+                />
+              </div>
+            )}
+          </section>
+
           <section className="sheet">
             <div className="sheet-head">
               <div>

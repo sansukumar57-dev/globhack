@@ -109,6 +109,7 @@ client.chat.completions.create(model="acme-llm/gpt-4o", messages=[{"role": "user
 
 - **Rolling 30-day windows**, same semantics as Bifrost's `reset_duration` budgets.
 - Burn rate reported over 1h/6h/24h; exhaustion ETA uses the higher of the 6h and 24h rates, so a spike still counts after it leaves the short window: `eta = (budget − spent) / max(burn₆ₕ, burn₂₄ₕ)`.
+- **Trained spend forecaster** (`foresight/model.py`): gradient-boosted trees over hour-of-day, day-of-week, per-key spend lags (1h/24h/168h) and rolling means, trained on the gateway's own metered buckets via `POST /api/model/train`. The artifact is a few hundred KB — deliberately far under a 100 MB budget — and drives the dashed next-12h projection on the Overview chart with time-ordered validation against a naive same-hour-last-week baseline (`MAE $0.20/h` vs `$0.21/h` naive in the demo data). Governance ETAs stay statistical by design; no artifact / no sklearn simply falls back.
 - Anomaly detection: per key, per hour-of-day slot, robust z via median/MAD over the trailing 21 days — tight enough that business-hour traffic never hides behind overnight baselines.
 - Trend: least-squares slope of daily totals per key; stability via coefficient of variation over 14 days.
 - Alerting has per-`(key, kind)` cooldowns so a breaching key pages once per window, not once per request.
@@ -129,6 +130,8 @@ GET    /api/alerts                   # audit trail (policy fires, threshold aler
 POST   /api/simulator                # {vk, from_model, to_model, shift_pct}
 GET    /api/recommendations          # fleet right-sizing table
 GET    /api/settings | PUT           # webhook URL + thresholds
+GET    /api/model                    # trained forecaster status, metrics, artifact size
+POST   /api/model/train              # retrain on the live metered history (CPU, seconds)
 POST   /api/settings/test-webhook    # fire a test payload
 GET    /api/webhook-sink             # inspect what your Slack would receive
 POST   /api/seed                     # wipe + reseed the 21-day demo fleet

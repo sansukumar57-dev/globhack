@@ -28,34 +28,48 @@ function clock(ts) {
   })
 }
 
-export function AreaChart({ data }) {
+export function AreaChart({ data, forecast }) {
   const [hover, setHover] = useState(null)
 
   const chart = useMemo(() => {
     if (!data || data.length === 0) return null
-    const maxCost = Math.max(...data.map((d) => Number(d.cost) || 0), 0.01)
+    const fc = forecast && forecast.length > 0 ? forecast : null
+    const all = fc ? [...data, ...fc] : data
+    const histLen = data.length
+    const maxCost = Math.max(...all.map((d) => Number(d.cost) || 0), 0.01)
     const yMax = niceMax(maxCost)
     const innerW = W - PAD.left - PAD.right
     const innerH = H - PAD.top - PAD.bottom
-    const x = (i) => PAD.left + (data.length > 1 ? (i / (data.length - 1)) * innerW : innerW / 2)
+    const x = (i) => PAD.left + (all.length > 1 ? (i / (all.length - 1)) * innerW : innerW / 2)
     const y = (value) => PAD.top + innerH - (Math.max(0, value) / yMax) * innerH
-    const points = data.map((d, i) => [x(i), y(Number(d.cost) || 0)])
-    const line = points
+    const points = all.map((d, i) => [x(i), y(Number(d.cost) || 0)])
+    const histPoints = points.slice(0, histLen)
+    const line = histPoints
       .map(([px, py], i) => `${i === 0 ? 'M' : 'L'}${px.toFixed(1)},${py.toFixed(1)}`)
       .join(' ')
+    const forecastPath = fc
+      ? [histPoints[histPoints.length - 1], ...points.slice(histLen)]
+          .map(([px, py], i) => `${i === 0 ? 'M' : 'L'}${px.toFixed(1)},${py.toFixed(1)}`)
+          .join(' ')
+      : null
     const baseline = PAD.top + innerH
-    const area = `${line} L${points[points.length - 1][0].toFixed(1)},${baseline} L${points[0][0].toFixed(1)},${baseline} Z`
+    const area = `${line} L${histPoints[histPoints.length - 1][0].toFixed(1)},${baseline} L${histPoints[0][0].toFixed(1)},${baseline} Z`
     let peakIndex = 0
     data.forEach((d, i) => {
       if ((Number(d.cost) || 0) > (Number(data[peakIndex].cost) || 0)) peakIndex = i
     })
     const ticks = [0, yMax / 2, yMax]
-    return { points, line, area, yMax, innerW, innerH, x, y, ticks, peakIndex, baseline }
-  }, [data])
+    return {
+      points, line, area, yMax, innerW, innerH, x, y, ticks, peakIndex, baseline,
+      histLen, forecastPath, nowX: fc ? x(histLen - 1) : null,
+    }
+  }, [data, forecast])
 
   if (!chart || !data || data.length === 0) {
     return <div className="empty">No usage in this window yet.</div>
   }
+
+  const projected = (i) => i >= chart.histLen
 
   const peak = data[chart.peakIndex]
   const [peakX, peakY] = chart.points[chart.peakIndex]
@@ -68,8 +82,12 @@ export function AreaChart({ data }) {
   const peakLabelY = peakY > 50 ? peakY - 30 : peakY + 10
 
   const hoverPoint = hover != null ? chart.points[hover] : null
-  const hoverData = hover != null ? data[hover] : null
-  const hoverText = hoverData ? `${clock(hoverData.hour)} · ${fmtUsd(hoverData.cost)}/h` : ''
+  const hoverData = hover != null
+    ? (projected(hover) ? (forecast ? forecast[hover - chart.histLen] : null) : data[hover])
+    : null
+  const hoverText = hoverData
+    ? `${clock(hoverData.hour)} · ${fmtUsd(hoverData.cost)}/h${projected(hover) ? ' · projected' : ''}`
+    : ''
   const hoverWidth = hoverText.length * 5.2 + 16
   const hoverX = hoverPoint
     ? Math.min(Math.max(PAD.left, hoverPoint[0] - hoverWidth / 2), W - PAD.right - hoverWidth)
@@ -80,8 +98,9 @@ export function AreaChart({ data }) {
     const ratio = (event.clientX - rect.left) / rect.width
     const plotX = ratio * W
     const within = (plotX - PAD.left) / chart.innerW
-    const index = Math.round(within * (data.length - 1))
-    setHover(Math.min(data.length - 1, Math.max(0, index)))
+    const total = chart.points.length
+    const index = Math.round(within * (total - 1))
+    setHover(Math.min(total - 1, Math.max(0, index)))
   }
 
   return (
@@ -90,7 +109,7 @@ export function AreaChart({ data }) {
         className="chart-svg"
         viewBox={`0 0 ${W} ${H}`}
         role="img"
-        aria-label={`Fleet spend over the last 24 hours. Peak ${fmtUsd(peak.cost)} per hour ${timeAgo(peak.hour)}.`}
+        aria-label={`Fleet spend over the last 24 hours. Peak ${fmtUsd(peak.cost)} per hour ${timeAgo(peak.hour)}.${chart.forecastPath ? ' Dashed extension shows the trained model projection for the next 12 hours.' : ''}`}
       >
         {chart.ticks.map((tick) => {
           const ty = chart.y(tick)
@@ -106,8 +125,29 @@ export function AreaChart({ data }) {
 
         <line className="axis-line" x1={PAD.left} x2={W - PAD.right} y1={chart.baseline} y2={chart.baseline} />
 
+        {chart.forecastPath && (
+          <rect
+            className="future-band"
+            x={chart.nowX}
+            y={PAD.top}
+            width={W - PAD.right - chart.nowX}
+            height={chart.innerH}
+          />
+        )}
+
         <path className="area" d={chart.area} />
         <path className="line" d={chart.line} />
+        {chart.forecastPath && <path className="line-dash" d={chart.forecastPath} />}
+
+        {chart.forecastPath && (
+          <line
+            className="now-line"
+            x1={chart.nowX}
+            x2={chart.nowX}
+            y1={PAD.top}
+            y2={chart.baseline}
+          />
+        )}
 
         {hover == null && (
           <>
@@ -175,25 +215,45 @@ export function AreaChart({ data }) {
           onMouseLeave={() => setHover(null)}
         />
 
-        {[0, Math.floor((data.length - 1) / 2), data.length - 1].map((index, i) => {
-          const [px] = chart.points[index]
-          const anchor = i === 0 ? 'start' : i === 2 ? 'end' : 'middle'
-          const label = i === 0 ? '24h ago' : i === 2 ? 'now' : '12h ago'
-          return (
-            <text
-              key={i}
-              className="axis-label"
-              x={px}
-              y={H - 7}
-              textAnchor={anchor}
-            >
-              {label}
-            </text>
-          )
-        })}
+        {chart.forecastPath
+          ? [
+              [0, '24h ago', 'start'],
+              [Math.floor((chart.histLen - 1) / 2), '12h ago', 'middle'],
+              [chart.histLen - 1, 'now', 'middle'],
+              [chart.points.length - 1, '+12h', 'end'],
+            ].map(([index, label, anchor], i) => (
+              <text
+                key={i}
+                className="axis-label"
+                x={chart.points[index][0]}
+                y={H - 7}
+                textAnchor={anchor}
+              >
+                {label}
+              </text>
+            ))
+          : [0, Math.floor((data.length - 1) / 2), data.length - 1].map((index, i) => {
+              const [px] = chart.points[index]
+              const anchor = i === 0 ? 'start' : i === 2 ? 'end' : 'middle'
+              const label = i === 0 ? '24h ago' : i === 2 ? 'now' : '12h ago'
+              return (
+                <text
+                  key={i}
+                  className="axis-label"
+                  x={px}
+                  y={H - 7}
+                  textAnchor={anchor}
+                >
+                  {label}
+                </text>
+              )
+            })}
       </svg>
       <div className="chart-foot">
         <span className="chart-legend"><span className="swatch" /> Hourly spend</span>
+        {chart.forecastPath && (
+          <span className="chart-legend"><span className="swatch dash" /> Model · next 12h</span>
+        )}
         <span className="chart-legend"><span className="swatch peak" /> Peak</span>
         <span style={{ marginLeft: 'auto' }}>Hover for hourly detail</span>
       </div>

@@ -1521,6 +1521,23 @@ a.sheet-meta:hover { color: var(--accent-ink); }
   background: var(--ink);
 }
 .chart-legend .swatch.peak { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.chart .future-band { fill: rgba(178, 58, 12, 0.035); }
+.chart .now-line {
+  stroke: var(--rule-strong);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+.chart .line-dash {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  stroke-dasharray: 4 3;
+}
+.chart-legend .swatch.dash {
+  background: repeating-linear-gradient(90deg, var(--accent) 0 4px, transparent 4px 7px);
+}
 
 /* ================================================================ states */
 

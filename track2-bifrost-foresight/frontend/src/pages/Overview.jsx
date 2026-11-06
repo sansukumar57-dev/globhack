@@ -160,12 +160,18 @@ export default function Overview({ refreshKey, onReseed, reseeding }) {
             <div className="sheet-head">
               <div>
                 <h2 className="sheet-title">Fleet burn</h2>
-                <p className="sheet-sub">Hourly spend across all virtual keys · last 24 hours</p>
+                <p className="sheet-sub">
+                  {data.model_forecast
+                    ? 'Hourly spend across all virtual keys · solid = metered, dashed = trained model'
+                    : 'Hourly spend across all virtual keys · last 24 hours'}
+                </p>
               </div>
-              <span className="sheet-meta">1h buckets</span>
+              <span className="sheet-meta">
+                {data.model_meta ? `${data.model_meta.keys_used} keys · +${data.model_meta.hours}h ` : ''}1h buckets
+              </span>
             </div>
             <div className="sheet-body">
-              <AreaChart data={data.hourly_all} />
+              <AreaChart data={data.hourly_all} forecast={data.model_forecast} />
             </div>
           </section>
 

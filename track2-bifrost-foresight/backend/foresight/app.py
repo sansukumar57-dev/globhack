@@ -24,6 +24,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import anomaly as anomaly_mod
 from . import forecast as forecast_mod
+from . import model as model_mod
 from . import policy as policy_mod
 from . import store
 from .metering import meter_chat_request
@@ -298,7 +299,8 @@ async def models_proxy(request: Request):
 @app.get("/api/health")
 async def api_health():
     return {"status": "ok", "service": "bifrost-foresight", "version": "0.1.0",
-            "bifrost_url": BIFROST_URL, "bifrost_reachable": await bifrost_reachable()}
+            "bifrost_url": BIFROST_URL, "bifrost_reachable": await bifrost_reachable(),
+            "forecaster_loaded": model_mod.load() is not None}
 
 
 @app.get("/api/overview")
@@ -308,6 +310,7 @@ async def api_overview():
     payloads = [_key_payload(k, now) for k in keys]
     statuses = [p["status"] for p in payloads]
     hourly_all = store.hourly_series(None, now - 24 * 3600, now)
+    model_forecast, model_meta = model_mod.fleet_forecast()
     today_start = now - (now % 86400)
     return {
         "generated_at": now,
@@ -325,6 +328,8 @@ async def api_overview():
         "overall_status": forecast_mod.overall_severity(statuses),
         "keys": payloads,
         "hourly_all": hourly_all,
+        "model_forecast": model_forecast,
+        "model_meta": model_meta,
         "top_models": store.model_breakdown(None, now - WINDOW_S)[:6],
         "recent_alerts": store.list_alerts(5),
     }
@@ -497,6 +502,21 @@ async def api_recommendations():
         })
     out.sort(key=lambda r: r["savings_30d"], reverse=True)
     return {"recommendations": out, "total_savings_30d": round(sum(r["savings_30d"] for r in out), 2)}
+
+
+@app.get("/api/model")
+async def api_model():
+    """Status of the compact trained forecaster (artifact, metrics, size)."""
+    return model_mod.status()
+
+
+@app.post("/api/model/train")
+async def api_model_train():
+    """Train the forecaster on the live metered history. Fast, CPU-only."""
+    try:
+        return model_mod.retrain_from_store()
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/settings")
