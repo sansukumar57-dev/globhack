@@ -95,6 +95,7 @@ async def post_response(key: dict[str, Any], fc: dict[str, Any]) -> list[dict[st
     fired: list[dict[str, Any]] = []
     pct = float(fc.get("pct_used", 0.0))
     webhook = settings.get("webhook_url", "")
+    burn = float(fc.get("burn_rate_effective", fc.get("burn_rate_6h", 0.0)))
 
     for level in (0.75, 0.90, 0.95):
         if pct >= level and policy != "observe":
@@ -102,7 +103,7 @@ async def post_response(key: dict[str, Any], fc: dict[str, Any]) -> list[dict[st
             sev = "critical" if level >= 0.95 else "warning"
             title = f"{key['name']} at {pct:.0%} of 30d budget"
             detail = (f"Rolling 30-day spend ${fc['spent_usd']:.2f} of ${fc['budget_usd']:.2f} "
-                      f"(${fc['remaining_usd']:.2f} left). Burn ${fc['burn_rate_6h']:.2f}/h.")
+                      f"(${fc['remaining_usd']:.2f} left). Burn ${burn:.2f}/h.")
             fired.append(await _alert(key, kind, sev, title, detail,
                                       {"pct_used": pct, "burn_6h": fc["burn_rate_6h"]},
                                       notify=True, webhook=webhook, cooldown_seconds=6 * 3600))
@@ -112,7 +113,7 @@ async def post_response(key: dict[str, Any], fc: dict[str, Any]) -> list[dict[st
         hours_left = fc.get("hours_until_exhaustion")
         if hours_left is not None and hours_left <= horizon and fc.get("status") == "critical":
             title = f"Budget for {key['name']} exhausts in {hours_left:.1f}h"
-            detail = (f"At the current burn rate (${fc['burn_rate_6h']:.2f}/h) the 30-day window "
+            detail = (f"At the current burn rate (${burn:.2f}/h) the 30-day window "
                       f"runs dry before it resets. Bifrost's static cap only trips at 100%.")
             fired.append(await _alert(key, "horizon_alert", "critical", title, detail,
                                       {"hours_left": round(hours_left, 2)},

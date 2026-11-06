@@ -76,7 +76,10 @@ def forecast(*, budget_usd: float, spent_usd: float, hourly: list[dict[str, Any]
     pct_used = (spent_usd / budget_usd) if budget_usd > 0 else 0.0
     projected_30d = burn_24h * 24 * 30.0
 
-    effective_burn = burn_6h if burn_6h > 0 else burn_24h
+    # Use the higher of the two signals: a spike that has rolled out of the 6h
+    # window still matters to a 30-day budget, and taking the max keeps the
+    # projection conservative around business-hour vs overnight traffic.
+    effective_burn = max(burn_6h, burn_24h)
     exhaustion_hours: float | None = None
     if effective_burn > 1e-6:
         exhaustion_hours = remaining / effective_burn
@@ -100,6 +103,7 @@ def forecast(*, budget_usd: float, spent_usd: float, hourly: list[dict[str, Any]
         "burn_rate_1h": round(burn_1h, 4),
         "burn_rate_6h": round(burn_6h, 4),
         "burn_rate_24h": round(burn_24h, 4),
+        "burn_rate_effective": round(effective_burn, 4),
         "projected_30d_cost": round(burn_24h * 24 * 30, 2),
         "hours_until_exhaustion": round(exhaustion_hours, 2) if exhaustion_hours is not None else None,
         "exhaustion_ts": exhaustion_ts,

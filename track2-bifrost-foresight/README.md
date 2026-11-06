@@ -51,7 +51,7 @@ Three layers, one binary:
 
 The seeder builds a deterministic 21-day fleet with a pointed narrative:
 
-- **Growth Backend · prod** — inflected upward 8 days ago, burned **86% of its $500 budget**, and spiked **4.6× its 14:00 baseline** 8 hours ago. Foresight projects exhaustion in ~25 hours and flags `critical`. Bifrost sees nothing until 100%.
+- **Growth Backend · prod** — inflected upward 8 days ago, burned **86% of its $500 budget**, and spiked to **~9× its same-hour baseline**. Foresight projects exhaustion in under two days and flags `critical`. Bifrost sees nothing until 100%.
 - **Support Agent Fleet** — 73% of $800, upward drift, pacing armed for `gpt-4o-mini`.
 - **Staging CI** — healthy, metered, `notify` armed.
 - **Hackathon Sandbox** — dormant, `observe`.
@@ -108,7 +108,7 @@ client.chat.completions.create(model="acme-llm/gpt-4o", messages=[{"role": "user
 ## How the forecast works
 
 - **Rolling 30-day windows**, same semantics as Bifrost's `reset_duration` budgets.
-- Burn rate reported over 1h/6h/24h; exhaustion ETA uses the **max responsiveness** signal (6h burn, falling back to 24h): `eta = (budget − spent) / burn₆ₕ`.
+- Burn rate reported over 1h/6h/24h; exhaustion ETA uses the higher of the 6h and 24h rates, so a spike still counts after it leaves the short window: `eta = (budget − spent) / max(burn₆ₕ, burn₂₄ₕ)`.
 - Anomaly detection: per key, per hour-of-day slot, robust z via median/MAD over the trailing 21 days — tight enough that business-hour traffic never hides behind overnight baselines.
 - Trend: least-squares slope of daily totals per key; stability via coefficient of variation over 14 days.
 - Alerting has per-`(key, kind)` cooldowns so a breaching key pages once per window, not once per request.

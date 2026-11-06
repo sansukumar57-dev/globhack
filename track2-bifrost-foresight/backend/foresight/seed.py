@@ -1,9 +1,9 @@
 """Synthetic 21-day history seeder.
 
 Anchors a deterministic RNG to wall-clock so every demo run shows the same
-story: Growth Backend inflected upward eight days ago, spiked 4.6x eight hours
-ago, and is projected to exhaust its 30-day budget within hours — exactly the
-situation Bifrost's static 100% cap cannot see coming.
+story: Growth Backend inflected upward eight days ago, spiked 4.6x its 14:00
+baseline, and is projected to exhaust its 30-day budget within two days —
+exactly the situation Bifrost's static 100% cap cannot see coming.
 
 seed() resets the demo dataset (usage events, alerts, sink, policy fires) and
 rebuilds it. Live traffic is wiped along with the seed; do not run in prod.
@@ -16,7 +16,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-from . import store
+from . import anomaly, store
 from .pricing import price_for
 
 DEMO_KEYS: list[dict[str, Any]] = [
@@ -72,7 +72,10 @@ def seed(now: float | None = None) -> dict[str, Any]:
     start_hour = end_hour - (HOURS - 1) * 3600
 
     meta = {"events": 0, "keys": []}
-    anomaly_hour = end_hour - 8 * 3600
+    # Anchor the spike to the most recent 14:00 UTC. Seeding at 03:00 used to
+    # put the "4.6x spike" in the dead of night, where it was invisible on the
+    # 24h chart and barely moved the burn rate.
+    anomaly_hour = end_hour - ((int(end_hour // 3600) - 14) % 24) * 3600
 
     for spec in DEMO_KEYS:
         weights: list[float] = []
@@ -87,7 +90,9 @@ def seed(now: float | None = None) -> dict[str, Any]:
             w = _hour_weight(hour_of_day, weekday, spec["trend"], week_idx)
             w *= rng.uniform(0.72, 1.34)
             if ts == anomaly_hour and spec["vk"] == "sk-bf-foresight-growth-0001":
-                w *= 4.6
+                # Anchor to the 14:00 weekday baseline so the spike lands at a
+                # predictable, high-traffic point regardless of seed time.
+                w = _hour_weight(14, 2, spec["trend"], week_idx) * 4.6
             weights.append(w)
             hours.append(ts)
 
@@ -111,16 +116,20 @@ def seed(now: float | None = None) -> dict[str, Any]:
 
     # Seeded alert history: the story the dashboard should tell on first paint
     growth = DEMO_KEYS[0]
+    detected = anomaly.detect(store.hourly_series(growth["vk"], now - HOURS * 3600, now))
+    hit = next((a for a in detected if int(a["hour"]) == anomaly_hour), None)
+    ratio = hit["ratio"] if hit else 4.6
+    z = hit["z"] if hit else 0.0
     store.insert_alert(
         growth["vk"], "anomaly", "critical",
-        "Traffic anomaly on Growth Backend · prod (4.6× baseline)",
-        "Hour bucket flagged at 4.6x the same-hour-of-day median over 21 days "
-        "(robust z-test, MAD-scaled). Possible runaway agent loop after a deploy window.",
-        {"ratio": 4.6, "seeded": True}, ts=anomaly_hour + 240)
+        f"Traffic anomaly on Growth Backend · prod ({ratio:g}× baseline)",
+        f"Hour bucket flagged at {ratio:g}x the same-hour-of-day median over 21 days "
+        f"(robust z={z}). Possible runaway agent loop after a deploy window.",
+        {"ratio": ratio, "seeded": True}, ts=anomaly_hour + 240)
     store.insert_alert(
         growth["vk"], "horizon_alert", "critical",
         "Budget for Growth Backend · prod is on a projected breach",
-        "At the current 6-hour burn rate the rolling 30-day window runs dry before "
+        "At the current burn rate the rolling 30-day window runs dry before "
         "it resets. Bifrost's static cap only trips at 100%.",
         {"seeded": True}, ts=anomaly_hour + 300)
     store.insert_alert(
@@ -137,9 +146,9 @@ def seed(now: float | None = None) -> dict[str, Any]:
         '{"title":"policy","value":"pacing"}],"footer":"Bifrost Foresight · predictive governance"}]}')
     store.sink_record(
         {"Content-Type": "application/json", "User-Agent": "bifrost-foresight/0.1"},
-        '{"text":":red_circle: *Traffic anomaly on Growth Backend · prod (4.6× baseline)*",'
-        '"attachments":[{"color":"#fb7185","fields":[{"title":"key","value":"Growth Backend · prod"},'
-        '{"title":"policy","value":"soft_cap"}],"footer":"Bifrost Foresight · predictive governance"}]}')
+        f'{{"text":":red_circle: *Traffic anomaly on Growth Backend · prod ({ratio:g}× baseline)*",'
+        f'"attachments":[{{"color":"#fb7185","fields":[{{"title":"key","value":"Growth Backend · prod"}},'
+        f'{{"title":"policy","value":"soft_cap"}}],"footer":"Bifrost Foresight · predictive governance"}}]}}')
 
     return meta
 

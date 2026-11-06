@@ -43,6 +43,18 @@ def test_exhausted_budget_caps_out():
     assert f["remaining_usd"] == 0.0
 
 
+def test_spike_older_than_six_hours_still_drives_eta():
+    hourly = make_hourly(24.0, 24)  # $1/h
+    hourly[-10] = {**hourly[-10], "cost": 10.0}  # spike 10h ago: outside 6h, inside 24h
+    f = forecast.forecast(budget_usd=100.0, spent_usd=95.0, hourly=hourly,
+                          now=time.time(), alert_horizon_hours=48.0)
+    assert f["burn_rate_6h"] == 1.0
+    assert f["burn_rate_24h"] > 1.0
+    assert f["burn_rate_effective"] == f["burn_rate_24h"]
+    assert abs(f["hours_until_exhaustion"] - round(5.0 / f["burn_rate_24h"], 2)) < 1e-6
+    assert f["status"] == "critical"
+
+
 def test_anomaly_flags_spike_only():
     base = 1.0
     hourly = make_hourly(base * 200, 200)
