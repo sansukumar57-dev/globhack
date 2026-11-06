@@ -1,16 +1,22 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Radio, Zap, Loader2 } from 'lucide-react'
-import { api, fmtUsd, timeAgo, toast } from '../api'
+import { Loader2, Zap } from 'lucide-react'
+import { api, fmtTs, fmtUsd, timeAgo, toast } from '../api'
+import { EmptyState, PageHeader, monogram } from '../components/ui'
 
 export default function Traffic({ refreshKey }) {
   const [requests, setRequests] = useState([])
+  const [loaded, setLoaded] = useState(false)
   const [firing, setFiring] = useState(false)
 
   const load = useCallback(async () => {
     try {
       const res = await api.requests(60)
       setRequests(res.requests)
-    } catch { /* ignore */ }
+    } catch {
+      /* the top bar surfaces connectivity */
+    } finally {
+      setLoaded(true)
+    }
   }, [])
 
   useEffect(() => {
@@ -33,41 +39,83 @@ export default function Traffic({ refreshKey }) {
     }
   }
 
-  return (
-    <div className="panel panel-pad">
-      <div className="panel-title">
-        <span><Radio size={12} style={{ verticalAlign: -2, marginRight: 6 }} />Live metered traffic</span>
-        <button className="btn btn-sm" onClick={fire} disabled={firing}>
-          {firing ? <Loader2 size={13} className="spin" /> : <Zap size={13} />}
+  const header = (
+    <PageHeader
+      eyebrow="Telemetry · 05"
+      title={<>The wire,{' '}<em>live</em>.</>}
+      lede="Real round trips through Foresight → Bifrost → the demo upstream. Every response is metered, priced, and attributed to its virtual key."
+      actions={(
+        <button className="btn" onClick={fire} disabled={firing}>
+          {firing ? <Loader2 className="spin" size={13} aria-hidden="true" /> : <Zap size={13} aria-hidden="true" />}
           {firing ? 'Firing…' : 'Fire 8 live requests'}
         </button>
-      </div>
-      <div style={{ fontSize: 11, color: 'var(--muted-2)', marginBottom: 10 }}>
-        Real round trips: this button calls <span className="mono">127.0.0.1:8400/v1/chat/completions</span> → Bifrost OSS → the demo upstream.
-        Every response is metered, priced and attributed to its virtual key.
-      </div>
-      <table className="table">
-        <thead>
-          <tr><th>Time</th><th>Key</th><th>Model</th><th>Tokens</th><th>Cost</th><th>Latency</th><th>Source</th></tr>
-        </thead>
-        <tbody>
-          {requests.length === 0 && (
-            <tr><td colSpan={7} className="empty">No metered requests yet — hit “Fire 8 live requests”.</td></tr>
-          )}
-          {requests.map((r) => (
-            <tr key={r.id}>
-              <td className="mono">{timeAgo(r.ts)}</td>
-              <td><b>{r.key_name || r.vk?.slice(0, 12)}</b></td>
-              <td className="mono">{String(r.model).split('/').pop()}</td>
-              <td className="mono">{(r.prompt_tokens + r.completion_tokens).toLocaleString()}</td>
-              <td className="mono">{fmtUsd(r.cost_usd, 4)}</td>
-              <td className="mono">{r.latency_ms}ms</td>
-              <td><span className="tag">{r.source}</span></td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <style>{'.spin { animation: spin 1s linear infinite; } @keyframes spin { to { transform: rotate(360deg); } }'}</style>
+      )}
+    />
+  )
+
+  return (
+    <div className="page">
+      {header}
+
+      <section className="sheet">
+        <div className="traffic-bar">
+          <span className="traffic-live"><span className="dot" /> live</span>
+          <span>{requests.length} most recent</span>
+          <span className="spacer" />
+          <span>auto-refresh · 5s</span>
+          <span className="traffic-endpoint">127.0.0.1:8400/v1/chat/completions</span>
+        </div>
+
+        {!loaded ? (
+          <div className="empty">Reading the wire…</div>
+        ) : requests.length === 0 ? (
+          <EmptyState
+            title="No requests yet."
+            detail="Fire eight live requests and watch the chain meter, price, and attribute every token."
+          />
+        ) : (
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th scope="col">Time</th>
+                  <th scope="col">Key</th>
+                  <th scope="col">Model</th>
+                  <th scope="col" className="r">Tokens</th>
+                  <th scope="col" className="r">Cost</th>
+                  <th scope="col" className="r">Latency</th>
+                  <th scope="col">Source</th>
+                </tr>
+              </thead>
+              <tbody>
+                {requests.map((r) => {
+                  const tokens = (r.prompt_tokens || 0) + (r.completion_tokens || 0)
+                  const live = r.source === 'live'
+                  return (
+                    <tr key={r.id}>
+                      <td>
+                        <div className="strong">{timeAgo(r.ts)}</div>
+                        <span className="sub">{fmtTs(r.ts)}</span>
+                      </td>
+                      <td>
+                        <div className="key-id">
+                          <span className="key-mark">{monogram(r.key_name || r.vk || '')}</span>
+                          <div className="key-name">{r.key_name || r.vk?.slice(0, 12)}</div>
+                        </div>
+                      </td>
+                      <td className="mono">{String(r.model).split('/').pop()}</td>
+                      <td className="r num">{tokens.toLocaleString()}</td>
+                      <td className="r num">{fmtUsd(r.cost_usd, 4)}</td>
+                      <td className="r num">{r.latency_ms}ms</td>
+                      <td><span className={`tag ${live ? 'tag-green' : ''}`}>{r.source}</span></td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
     </div>
   )
 }

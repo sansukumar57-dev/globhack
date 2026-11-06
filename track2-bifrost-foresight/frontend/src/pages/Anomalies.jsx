@@ -1,46 +1,150 @@
 import { useCallback, useEffect, useState } from 'react'
-import { TrendingUp, ScanSearch, Radar } from 'lucide-react'
-import { api, fmtUsd, fmtTs, timeAgo } from '../api'
+import { api, fmtTs, fmtUsd, timeAgo } from '../api'
+import { EmptyState, Loading, PageHeader, monogram } from '../components/ui'
 
 export default function Anomalies({ refreshKey }) {
   const [data, setData] = useState({ anomalies: [], threshold: 3.5, window_days: 7 })
+  const [loading, setLoading] = useState(true)
 
   const load = useCallback(async () => {
     try {
       setData(await api.anomalies())
-    } catch { /* ignore */ }
+    } catch {
+      /* the top bar surfaces connectivity */
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
   useEffect(() => { load() }, [load, refreshKey])
 
+  const header = (
+    <PageHeader
+      eyebrow="Detection · 03"
+      title={<>Outliers,{' '}<em>in context</em>.</>}
+      lede="Same-hour baselines separate a real spike from a busy Tuesday. The forecast layer handles drift; this layer catches the step change."
+    />
+  )
+
+  if (loading) {
+    return (
+      <div className="page">
+        {header}
+        <Loading label="Scanning hourly buckets…" />
+      </div>
+    )
+  }
+
+  const anomalies = data.anomalies || []
+
   return (
-    <div className="panel panel-pad">
-      <div className="panel-title">
-        <span><ScanSearch size={12} style={{ verticalAlign: -2, marginRight: 6 }} />Traffic anomalies · trailing {data.window_days}d</span>
-        <span className="hint">same hour-of-day robust z (median/MAD) · threshold z ≥ {data.threshold}</span>
-      </div>
-      {data.anomalies.length === 0 && (
-        <div className="empty">
-          <Radar size={26} style={{ opacity: 0.4, marginBottom: 8 }} />
-          <div>No outliers. Every hour sits inside its expected envelope.</div>
+    <div className="page">
+      {header}
+
+      <div className="tape three">
+        <div className="tape-cell">
+          <div className="tape-label">Flagged buckets</div>
+          <div className="tape-value">{anomalies.length}</div>
+          <div className="tape-context">trailing {data.window_days} days</div>
         </div>
-      )}
-      <div className="alert-list">
-        {data.anomalies.map((a) => (
-          <div className="anomaly-item" key={`${a.vk}-${a.hour}`}>
-            <div className="anomaly-z">{a.z.toFixed(1)}<span style={{ fontSize: 11, display: 'block', color: 'var(--muted)' }}>σ</span></div>
-            <div style={{ minWidth: 0 }}>
-              <div className="alert-title">{a.key_name} burned {fmtUsd(a.cost)} — <span className="anomaly-ratio">{a.ratio}×</span> its {fmtTs(a.hour)} baseline</div>
-              <div className="alert-detail">Baseline ${a.baseline.toFixed(2)}/h for this hour-of-day over the trailing 21 days. Signature of a runaway agent loop or a leaked credential, not organic growth.</div>
-              <div className="alert-time mono">{timeAgo(a.hour)} · {a.team} · same hour-of-day detector</div>
-            </div>
+        <div className="tape-cell">
+          <div className="tape-label">Threshold</div>
+          <div className="tape-value">z ≥ {data.threshold}</div>
+          <div className="tape-context">robust median / MAD</div>
+        </div>
+        <div className="tape-cell">
+          <div className="tape-label">Baseline</div>
+          <div className="tape-value">21 days</div>
+          <div className="tape-context">same hour of day, per key</div>
+        </div>
+      </div>
+
+      <section className="sheet">
+        <div className="sheet-head">
+          <div>
+            <h2 className="sheet-title">Traffic anomalies</h2>
+            <p className="sheet-sub">Same hour-of-day robust z · flagged in the trailing {data.window_days} days</p>
           </div>
-        ))}
-      </div>
-      <div style={{ marginTop: 14, display: 'flex', gap: 10, alignItems: 'center', color: 'var(--muted-2)', fontSize: 11 }}>
-        <TrendingUp size={13} />
-        Seasonality-aware detection: business-hours traffic is judged against business-hours baselines, so a 2pm spike never hides behind an overnight median.
-      </div>
+          <span className="sheet-meta">{anomalies.length} flagged</span>
+        </div>
+
+        {anomalies.length === 0 ? (
+          <EmptyState
+            title="No outliers."
+            detail="Every hourly bucket sits inside its expected same-hour envelope. The detector is still watching."
+          />
+        ) : (
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th scope="col">When</th>
+                  <th scope="col">Key</th>
+                  <th scope="col" className="r">Hour cost</th>
+                  <th scope="col" className="r">Baseline</th>
+                  <th scope="col" className="r">Multiple</th>
+                  <th scope="col" className="r">z-score</th>
+                  <th scope="col" className="r"><span className="sr-only">Action</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                {anomalies.map((a) => (
+                  <tr key={`${a.vk}-${a.hour}`}>
+                    <td>
+                      <div className="strong">{timeAgo(a.hour)}</div>
+                      <span className="sub">{fmtTs(a.hour)}</span>
+                    </td>
+                    <td>
+                      <div className="key-id">
+                        <span className="key-mark">{monogram(a.key_name)}</span>
+                        <div>
+                          <div className="key-name">{a.key_name}</div>
+                          <div className="key-team">{a.team}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="r num strong">{fmtUsd(a.cost)}</td>
+                    <td className="r num">{fmtUsd(a.baseline)}</td>
+                    <td className="r"><span className="ratio">{a.ratio}×</span></td>
+                    <td className="r"><span className="zscore">{a.z.toFixed(1)}σ</span></td>
+                    <td className="r"><a className="btn-link" href="#keys">Inspect key →</a></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <section className="sheet">
+        <div className="sheet-head">
+          <div>
+            <h2 className="sheet-title">Method</h2>
+            <p className="sheet-sub">Why a 2pm spike is judged against 2pms</p>
+          </div>
+          <span className="sheet-meta">median / MAD</span>
+        </div>
+        <div className="method">
+          <div>
+            <h3>How it detects</h3>
+            <p>
+              For every key and every hour, compare the bucket to the same hour-of-day across the
+              trailing 21 days. The median is the baseline; the median absolute deviation is the
+              spread. Business-hours traffic is judged against business-hours baselines, so an
+              overnight median never hides a daytime spike.
+            </p>
+          </div>
+          <div>
+            <h3>What it catches</h3>
+            <p>
+              A sudden multiple of the expected hour is the signature of a runaway agent loop or a
+              leaked credential. Gradual drift belongs to the forecast layer; this detector is for
+              the step change. Flagged buckets are surfaced in the trailing {data.window_days} days
+              at z ≥ {data.threshold}.
+            </p>
+          </div>
+        </div>
+      </section>
     </div>
   )
 }

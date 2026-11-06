@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useState } from 'react'
-import { Activity, AlertTriangle, DollarSign, Flame, Gauge, ShieldAlert, Zap } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Database } from 'lucide-react'
 import { api, fmtUsd, fmtHoursLeft, timeAgo } from '../api'
 import { AreaChart, BudgetBar, StatusChip } from '../components/charts'
+import { EmptyState, Loading, PageHeader, monogram, toneFor } from '../components/ui'
 
-export default function Overview({ refreshKey }) {
+const STATUS_RANK = { critical: 0, exhausted: 0, watch: 1, healthy: 2 }
+
+export default function Overview({ refreshKey, onReseed, reseeding }) {
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
 
@@ -18,110 +21,322 @@ export default function Overview({ refreshKey }) {
 
   useEffect(() => { load() }, [load, refreshKey])
 
-  if (error) return <div className="panel panel-pad empty">Failed to load overview: {error}</div>
-  if (!data) return <div className="panel panel-pad empty">Loading fleet state…</div>
+  const sortedKeys = useMemo(() => {
+    if (!data) return []
+    return [...data.keys].sort((a, b) => {
+      const rank = (STATUS_RANK[a.status] ?? 3) - (STATUS_RANK[b.status] ?? 3)
+      return rank || b.pct_used - a.pct_used
+    })
+  }, [data])
 
-  const totalBudget = data.keys.reduce((s, k) => s + k.budget_usd, 0)
+  const header = (
+    <PageHeader
+      eyebrow="Operations · 01"
+      title={<>Fleet spend,{' '}<em>forecasted</em>.</>}
+      lede="A live read on gateway spend, budget runway, and the next key to breach. Every number is metered, priced, and attributable."
+      actions={onReseed && (
+        <button className="btn btn-ghost" onClick={onReseed} disabled={reseeding}>
+          <Database size={13} aria-hidden="true" />
+          {reseeding ? 'Reseeding…' : 'Reseed demo data'}
+        </button>
+      )}
+    />
+  )
+
+  if (error && !data) {
+    return (
+      <div className="page">
+        {header}
+        <div className="sheet">
+          <EmptyState
+            title="The ledger is out of reach"
+            detail={`The console API did not answer: ${error}`}
+            action={<button className="btn btn-ghost" onClick={load}>Retry</button>}
+          />
+        </div>
+      </div>
+    )
+  }
+
+  if (!data) {
+    return (
+      <div className="page">
+        {header}
+        <Loading label="Reading the fleet ledger…" />
+      </div>
+    )
+  }
+
+  const atRisk = sortedKeys.filter((k) => k.status !== 'healthy')
+  const critical = sortedKeys.filter((k) => k.status === 'critical' || k.status === 'exhausted')
+  const next = atRisk.find((k) => k.hours_until_exhaustion != null) || atRisk[0]
+  const totalBudget = data.keys.reduce((sum, k) => sum + k.budget_usd, 0)
   const projectedPct = totalBudget > 0 ? data.projected_30d_cost / totalBudget : 0
-  const worst = data.keys.find((k) => k.status === 'critical' || k.status === 'exhausted')
+  const effectiveBurn = Math.max(data.burn_rate_6h, data.burn_rate_24h)
+  const alerts = data.recent_alerts || []
+  const topModels = data.top_models || []
+
+  const conditionSub = critical.length > 0
+    ? `${critical[0].name} is at ${Math.round(critical[0].pct_used * 100)}% of budget${atRisk.length > 1 ? ` · ${atRisk.length - 1} more on watch` : ''}.`
+    : atRisk.length > 0
+      ? `${atRisk[0].name} is at ${Math.round(atRisk[0].pct_used * 100)}% of budget. No key is critical.`
+      : 'Every key is inside its rolling 30-day budget.'
 
   return (
-    <>
-      <div className="kpi-grid">
-        <div className="panel kpi">
-          <div className="kpi-label"><DollarSign size={13} /> Spend today</div>
-          <div className="kpi-value">{fmtUsd(data.spend_today)}</div>
-          <div className="kpi-sub"><b>{data.requests_today}</b> metered requests · {fmtUsd(data.spend_window)} over 30d</div>
+    <div className="page">
+      {header}
+
+      <div className={`condition ${critical.length === 0 ? 'is-clear' : ''}`}>
+        <div>
+          <div className="condition-label">Fleet condition</div>
+          <div className="condition-main">
+            {critical.length > 0 ? (
+              <>
+                <span className="condition-hot">{critical.length} critical</span>
+                <span className="condition-sep">·</span>
+                {atRisk.length - critical.length} on watch
+              </>
+            ) : atRisk.length > 0 ? (
+              <>{atRisk.length} on watch</>
+            ) : (
+              'All keys inside budget'
+            )}
+          </div>
+          <div className="condition-sub">{conditionSub}</div>
         </div>
-        <div className="panel kpi">
-          <div className="kpi-label"><Flame size={13} /> Burn rate · 6h</div>
-          <div className="kpi-value">{fmtUsd(data.burn_rate_6h)}<span style={{ fontSize: 14, color: 'var(--muted)' }}>/h</span></div>
-          <div className="kpi-sub">{fmtUsd(data.burn_rate_24h)}/h trailing 24h · <b>anomaly-inflated</b></div>
+        <div className="condition-right">
+          <div className="condition-label">Next breach</div>
+          <div className="condition-main">{next ? next.name : 'No projected breach'}</div>
+          <div className="condition-sub">
+            {next
+              ? `exhausts in ${fmtHoursLeft(next.hours_until_exhaustion)} at ${fmtUsd(next.burn_rate_effective ?? next.burn_rate_24h)}/h`
+              : 'inside the rolling 30-day window'}
+          </div>
         </div>
-        <div className="panel kpi">
-          <div className="kpi-label"><Gauge size={13} /> Projected 30d cost</div>
-          <div className="kpi-value">{fmtUsd(data.projected_30d_cost, 0)}</div>
-          <div className="kpi-sub">vs <b>{fmtUsd(totalBudget, 0)}</b> fleet budget · <span className={projectedPct > 1 ? 'bad' : 'good'}>{(projectedPct * 100).toFixed(0)}%</span></div>
+        <a className="condition-link" href="#keys">Open ledger →</a>
+      </div>
+
+      <div className="tape">
+        <div className="tape-cell">
+          <div className="tape-label">Spend today</div>
+          <div className="tape-value">{fmtUsd(data.spend_today)}</div>
+          <div className="tape-context">
+            <b>{data.requests_today}</b> metered requests · {fmtUsd(data.spend_window)} over 30d
+          </div>
         </div>
-        <div className="panel kpi">
-          <div className="kpi-label"><ShieldAlert size={13} /> Keys at risk</div>
-          <div className="kpi-value">{data.keys_critical + data.keys_watch}<span style={{ fontSize: 14, color: 'var(--muted)' }}> / {data.keys.length}</span></div>
-          <div className="kpi-sub">{data.keys_critical > 0 ? <span className="bad">{worst?.name} critical</span> : <span className="good">none critical</span>}</div>
+        <div className="tape-cell">
+          <div className="tape-label" title="Exhaustion ETA uses the higher of the 6h and 24h burn rates.">
+            Effective burn
+          </div>
+          <div className="tape-value">{fmtUsd(effectiveBurn)}<span className="unit">/h</span></div>
+          <div className="tape-context">
+            6h {fmtUsd(data.burn_rate_6h)}/h · 24h {fmtUsd(data.burn_rate_24h)}/h
+          </div>
+        </div>
+        <div className="tape-cell">
+          <div className="tape-label">Projected · 30d</div>
+          <div className="tape-value">{fmtUsd(data.projected_30d_cost, 0)}</div>
+          <div className="tape-context">
+            vs {fmtUsd(totalBudget, 0)} fleet budget ·{' '}
+            <span className={projectedPct > 1 ? 'bad' : 'good'}>
+              {(projectedPct * 100).toFixed(0)}%
+            </span>
+          </div>
+        </div>
+        <div className="tape-cell">
+          <div className="tape-label">Keys at risk</div>
+          <div className="tape-value">{atRisk.length}<span className="unit"> / {data.keys.length}</span></div>
+          <div className="tape-context">
+            {critical.length > 0
+              ? <><span className="bad">{critical[0].name}</span> critical</>
+              : <span className="good">no critical keys</span>}
+          </div>
         </div>
       </div>
 
       <div className="overview-grid">
-        <div className="panel panel-pad">
-          <div className="panel-title">
-            <span><Activity size={12} style={{ verticalAlign: -2, marginRight: 6 }} />Fleet spend · last 24h</span>
-            <span className="hint">all virtual keys</span>
-          </div>
-          <AreaChart data={data.hourly_all} />
+        <div className="overview-main">
+          <section className="sheet">
+            <div className="sheet-head">
+              <div>
+                <h2 className="sheet-title">Fleet burn</h2>
+                <p className="sheet-sub">Hourly spend across all virtual keys · last 24 hours</p>
+              </div>
+              <span className="sheet-meta">1h buckets</span>
+            </div>
+            <div className="sheet-body">
+              <AreaChart data={data.hourly_all} />
+            </div>
+          </section>
 
-          <div className="panel-title" style={{ marginTop: 18 }}>
-            <span><Zap size={12} style={{ verticalAlign: -2, marginRight: 6 }} />Budget health · rolling 30d</span>
-            <span className="hint">Bifrost enforces at 100% — Foresight sees the cliff first</span>
-          </div>
-          <div className="budget-row">
-            {data.keys.map((k) => (
-              <div className="budget-item" key={k.vk}>
-                <div className="budget-head">
-                  <span className="key-dot" style={{ background: k.color }} />
-                  <div>
-                    <div className="budget-name">{k.name}</div>
-                    <div className="budget-team">{k.team} · {k.policy} policy{k.downgrade_active ? ' · downgrade armed' : ''}</div>
-                  </div>
-                  <div className="budget-meta">
-                    <span className="budget-spent"><b>{fmtUsd(k.spent_usd)}</b> / {fmtUsd(k.budget_usd, 0)}</span>
+          <section className="sheet">
+            <div className="sheet-head">
+              <div>
+                <h2 className="sheet-title">Budget health</h2>
+                <p className="sheet-sub">Rolling 30-day window · Bifrost enforces at 100%</p>
+              </div>
+              <a className="sheet-meta" href="#keys">Manage keys →</a>
+            </div>
+            <div className="table-wrap">
+              <table className="table budget-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Key</th>
+                    <th scope="col">Policy</th>
+                    <th scope="col" className="r">Spend / budget</th>
+                    <th scope="col">Used</th>
+                    <th scope="col" className="r">Runway</th>
+                    <th scope="col" className="r">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedKeys.map((k) => {
+                    const tone = toneFor(k.status)
+                    return (
+                      <tr key={k.vk} className={tone === 'critical' ? 'critical-row' : ''}>
+                        <td>
+                          <div className="key-id">
+                            <span className="key-mark">{monogram(k.name)}</span>
+                            <div>
+                              <div className="key-name">{k.name}</div>
+                              <div className="key-team">{k.team}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td>
+                          <span className="tag">{k.policy.replace('_', ' ')}</span>
+                          {k.downgrade_active && <span className="sub">downgraded → {k.downgrade_to}</span>}
+                        </td>
+                        <td className="r">
+                          <span className="spend-cell">
+                            <b>{fmtUsd(k.spent_usd)}</b> <span>/ {fmtUsd(k.budget_usd, 0)}</span>
+                          </span>
+                        </td>
+                        <td>
+                          <div className="used-cell">
+                            <BudgetBar pct={k.pct_used} tone={tone} />
+                            <span className="used-pct">{Math.round(k.pct_used * 100)}%</span>
+                          </div>
+                        </td>
+                        <td className="r">
+                          <div className="runway">
+                            {fmtHoursLeft(k.hours_until_exhaustion)}
+                            <small>{fmtUsd(k.burn_rate_effective ?? k.burn_rate_24h)}/h eff.</small>
+                          </div>
+                        </td>
+                        <td className="r"><StatusChip status={k.status} /></td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+
+        <aside className="overview-side">
+          <section className="sheet">
+            <div className="sheet-head">
+              <div>
+                <h2 className="sheet-title">Attention</h2>
+                <p className="sheet-sub">Keys with a projected breach</p>
+              </div>
+              <span className="sheet-meta">{atRisk.length} of {data.keys.length}</span>
+            </div>
+            <div className="attention-list">
+              {atRisk.length === 0 && (
+                <EmptyState
+                  title="All clear"
+                  detail="No key is projected to exhaust inside the alert horizon."
+                />
+              )}
+              {atRisk.map((k) => (
+                <a className={`attention-item ${toneFor(k.status)}`} href="#keys" key={k.vk}>
+                  <div className="attention-top">
+                    <span className="key-mark">{monogram(k.name)}</span>
+                    <span className="attention-name">{k.name}</span>
                     <StatusChip status={k.status} />
                   </div>
-                </div>
-                <BudgetBar pct={k.pct_used} />
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10.5, color: 'var(--muted-2)' }} className="mono">
-                  <span>{(k.pct_used * 100).toFixed(0)}% used · exhausts in {fmtHoursLeft(k.hours_until_exhaustion)}</span>
-                  <span>burn {fmtUsd(k.burn_rate_6h)}/h · trend {k.trend_pct_per_day >= 0 ? '+' : ''}{k.trend_pct_per_day}%/d</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="panel panel-pad">
-          <div className="panel-title">
-            <span><AlertTriangle size={12} style={{ verticalAlign: -2, marginRight: 6 }} />Recent alerts</span>
-            <span className="hint">{data.recent_alerts.length} in window</span>
-          </div>
-          <div className="alert-list">
-            {data.recent_alerts.length === 0 && <div className="empty">No alerts. Quiet fleets make expensive surprises.</div>}
-            {data.recent_alerts.map((a) => (
-              <div className="alert-item" key={a.id}>
-                <div className={`alert-icon alert-${a.severity === 'critical' ? 'critical' : a.severity === 'warning' ? 'warning' : 'info'}`}>
-                  <AlertTriangle size={15} />
-                </div>
-                <div>
-                  <div className="alert-title">{a.title}</div>
-                  <div className="alert-detail">{a.detail}</div>
-                  <div className="alert-time mono">{timeAgo(a.ts)} · {a.kind}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="panel-title" style={{ marginTop: 18 }}>Top models · 30d</div>
-          <table className="table">
-            <thead><tr><th>Model</th><th>Cost</th><th>Reqs</th></tr></thead>
-            <tbody>
-              {data.top_models.map((m) => (
-                <tr key={m.model}>
-                  <td className="mono"><b>{String(m.model).split('/').pop()}</b></td>
-                  <td className="mono">{fmtUsd(m.cost)}</td>
-                  <td className="mono">{m.requests}</td>
-                </tr>
+                  <div className="attention-meta">
+                    <span>{fmtUsd(k.spent_usd)} / {fmtUsd(k.budget_usd, 0)}</span>
+                    <span>{fmtHoursLeft(k.hours_until_exhaustion)} left</span>
+                    <span>{fmtUsd(k.burn_rate_effective ?? k.burn_rate_24h)}/h</span>
+                  </div>
+                  <div className="attention-note">
+                    {k.stability} burn · {k.trend_pct_per_day >= 0 ? '+' : ''}{k.trend_pct_per_day}%/day trend ·{' '}
+                    {k.policy.replace('_', ' ')} policy
+                  </div>
+                </a>
               ))}
-            </tbody>
-          </table>
-        </div>
+            </div>
+          </section>
+
+          <section className="sheet">
+            <div className="sheet-head">
+              <div>
+                <h2 className="sheet-title">Recent alerts</h2>
+                <p className="sheet-sub">Pages, caps, and horizon warnings</p>
+              </div>
+              <span className="sheet-meta">{alerts.length} in window</span>
+            </div>
+            <div className="timeline">
+              {alerts.length === 0 && (
+                <EmptyState title="Quiet" detail="No alerts in the current window." />
+              )}
+              {alerts.map((a) => {
+                const severity = a.severity === 'critical' ? 'critical' : a.severity === 'warning' ? 'warning' : 'info'
+                return (
+                  <div className="timeline-item" key={a.id}>
+                    <div className="timeline-time">{timeAgo(a.ts)}</div>
+                    <div className="timeline-rail">
+                      <span className={`timeline-dot ${severity}`} />
+                    </div>
+                    <div>
+                      <div className="timeline-title">{a.title}</div>
+                      <div className="timeline-detail">{a.detail}</div>
+                      <div className="timeline-meta">{a.kind.replaceAll('_', ' ')}</div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </section>
+
+          <section className="sheet">
+            <div className="sheet-head">
+              <div>
+                <h2 className="sheet-title">Top models</h2>
+                <p className="sheet-sub">Rolling 30 days</p>
+              </div>
+              <span className="sheet-meta">{topModels.length}</span>
+            </div>
+            {topModels.length === 0 ? (
+              <EmptyState title="No usage yet" detail="Metered model spend will appear here." />
+            ) : (
+              <div className="table-wrap">
+                <table className="table compact">
+                  <thead>
+                    <tr>
+                      <th scope="col">Model</th>
+                      <th scope="col" className="r">Cost</th>
+                      <th scope="col" className="r">Requests</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {topModels.map((m) => (
+                      <tr key={m.model}>
+                        <td className="mono strong">{String(m.model).split('/').pop()}</td>
+                        <td className="r num">{fmtUsd(m.cost, 0)}</td>
+                        <td className="r num">{m.requests}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        </aside>
       </div>
-    </>
+    </div>
   )
 }

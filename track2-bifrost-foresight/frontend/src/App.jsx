@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import {
   LayoutDashboard, KeyRound, ScanSearch, FlaskConical, Radio, Settings as SettingsIcon,
-  RefreshCw, Database, ExternalLink,
+  RefreshCw,
 } from 'lucide-react'
-import { api, onToast } from './api'
+import { api, onToast, toast } from './api'
 import Overview from './pages/Overview.jsx'
 import Keys from './pages/Keys.jsx'
 import Anomalies from './pages/Anomalies.jsx'
@@ -12,36 +12,68 @@ import Traffic from './pages/Traffic.jsx'
 import Settings from './pages/Settings.jsx'
 
 const NAV = [
-  { id: 'overview', label: 'Overview', icon: LayoutDashboard },
-  { id: 'keys', label: 'Virtual Keys', icon: KeyRound },
-  { id: 'anomalies', label: 'Anomalies', icon: ScanSearch },
-  { id: 'simulator', label: 'Right-sizing', icon: FlaskConical },
-  { id: 'traffic', label: 'Live Traffic', icon: Radio },
-  { id: 'settings', label: 'Autopilot', icon: SettingsIcon },
+  {
+    group: 'Monitor',
+    items: [
+      { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+      { id: 'keys', label: 'Virtual keys', icon: KeyRound },
+      { id: 'anomalies', label: 'Anomalies', icon: ScanSearch },
+      { id: 'traffic', label: 'Live traffic', icon: Radio },
+    ],
+  },
+  {
+    group: 'Plan',
+    items: [
+      { id: 'simulator', label: 'Right-sizing', icon: FlaskConical },
+      { id: 'settings', label: 'Autopilot', icon: SettingsIcon },
+    ],
+  },
 ]
 
 const PAGES = { Overview, Keys, Anomalies, Simulator, Traffic, Settings }
-const TITLES = {
-  overview: 'Gateway spend, forecasted',
-  keys: 'Virtual keys & budgets',
-  anomalies: 'Traffic anomaly detection',
-  simulator: 'Cost right-sizing simulator',
-  traffic: 'Live metered requests',
-  settings: 'Autopilot & webhooks',
+const PAGE_LABELS = {
+  overview: 'Overview',
+  keys: 'Virtual keys',
+  anomalies: 'Anomalies',
+  simulator: 'Right-sizing',
+  traffic: 'Live traffic',
+  settings: 'Autopilot',
+}
+
+function readPage() {
+  const id = window.location.hash.replace(/^#\/?/, '')
+  return PAGES[id.charAt(0).toUpperCase() + id.slice(1)] ? id : 'overview'
 }
 
 export default function App() {
-  const [page, setPage] = useState('overview')
+  const [page, setPage] = useState(readPage)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [lastUpdated, setLastUpdated] = useState(() => Date.now())
+  const [now, setNow] = useState(() => Date.now())
   const [bifrostOk, setBifrostOk] = useState(null)
   const [toastMsg, setToastMsg] = useState(null)
   const [reseeding, setReseeding] = useState(false)
 
-  useEffect(() => onToast((msg) => {
-    setToastMsg(msg)
-    const t = setTimeout(() => setToastMsg(null), 4200)
-    return () => clearTimeout(t)
-  }), [])
+  useEffect(() => {
+    let timer
+    const off = onToast((msg) => {
+      setToastMsg(msg)
+      clearTimeout(timer)
+      timer = setTimeout(() => setToastMsg(null), 4200)
+    })
+    return () => {
+      off()
+      clearTimeout(timer)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!window.location.hash) window.history.replaceState(null, '', '#overview')
+    const sync = () => setPage(readPage())
+    window.addEventListener('hashchange', sync)
+    sync()
+    return () => window.removeEventListener('hashchange', sync)
+  }, [])
 
   useEffect(() => {
     let mounted = true
@@ -56,95 +88,147 @@ export default function App() {
     }
     check()
     const t = setInterval(check, 10000)
-    return () => { mounted = false; clearInterval(t) }
+    return () => {
+      mounted = false
+      clearInterval(t)
+    }
   }, [])
 
   useEffect(() => {
-    const t = setInterval(() => setRefreshKey((k) => k + 1), 10000)
+    const t = setInterval(() => {
+      setRefreshKey((k) => k + 1)
+      setLastUpdated(Date.now())
+    }, 10000)
     return () => clearInterval(t)
   }, [])
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [])
+
+  const refresh = () => {
+    setRefreshKey((k) => k + 1)
+    setLastUpdated(Date.now())
+  }
 
   const reseed = async () => {
     setReseeding(true)
     try {
       await api.seed()
-      setRefreshKey((k) => k + 1)
+      refresh()
+      toast('Demo data reseeded')
+    } catch (e) {
+      toast(`Reseed failed: ${e.message}`)
     } finally {
       setReseeding(false)
     }
   }
 
-  const Active = PAGES[page.charAt(0).toUpperCase() + page.slice(1)]
+  const Active = PAGES[page.charAt(0).toUpperCase() + page.slice(1)] || Overview
+  const updatedAgo = Math.max(0, Math.floor((now - lastUpdated) / 1000))
+  const liveLabel = bifrostOk === false
+    ? 'gateway offline'
+    : updatedAgo < 2
+      ? 'live · just now'
+      : `live · updated ${updatedAgo}s ago`
 
   return (
-    <div className="shell">
-      <aside className="sidebar">
-        <div className="brand">
-          <svg className="brand-mark" viewBox="0 0 64 64" aria-hidden="true">
-            <rect width="64" height="64" rx="14" fill="#0d1030" />
-            <path d="M17 40 L25.5 40 L29.5 23 L36 40 L42.5 40 L46.5 31 L50 40"
-                  fill="none" stroke="url(#brandGrad)" strokeWidth="3.6" strokeLinecap="round" strokeLinejoin="round" />
-            <circle cx="53" cy="40" r="2.6" fill="#f472b6" />
-            <defs>
-              <linearGradient id="brandGrad" x1="17" y1="40" x2="53" y2="40" gradientUnits="userSpaceOnUse">
-                <stop stopColor="#7c5cff" /><stop offset="0.5" stopColor="#a855f7" /><stop offset="1" stopColor="#f472b6" />
-              </linearGradient>
-            </defs>
-          </svg>
-          <div>
-            <div className="brand-name"><em>Foresight</em></div>
-            <div className="brand-sub">Predictive governance</div>
+    <>
+      <a className="skip-link" href="#main-content">Skip to console</a>
+      <div className="shell">
+        <aside className="sidebar">
+          <div className="brand">
+            <svg className="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+              <rect x=".5" y=".5" width="31" height="31" rx="4" fill="none" stroke="#5a5449" />
+              <path
+                d="M6.5 21.5h4.2l2.5-9.5 3.6 13 3.1-8h4.6"
+                fill="none"
+                stroke="#eee9de"
+                strokeWidth="1.7"
+                strokeLinecap="square"
+                strokeLinejoin="miter"
+              />
+              <circle cx="25.5" cy="17" r="2" fill="#b23a0c" />
+            </svg>
+            <div>
+              <div className="brand-name">Foresight</div>
+              <div className="brand-sub">Spend desk</div>
+            </div>
           </div>
-        </div>
 
-        <div className="nav-label">Console</div>
-        {NAV.map((item) => {
-          const Icon = item.icon
-          return (
-            <button key={item.id} className={`nav-item ${page === item.id ? 'active' : ''}`} onClick={() => setPage(item.id)}>
-              <Icon size={16} />
-              <span>{item.label}</span>
+          {NAV.map((group) => (
+            <div className="nav-group" key={group.group}>
+              <div className="nav-label">{group.group}</div>
+              {group.items.map((item) => {
+                const Icon = item.icon
+                const active = page === item.id
+                return (
+                  <a
+                    key={item.id}
+                    href={`#${item.id}`}
+                    className={`nav-item ${active ? 'active' : ''}`}
+                    aria-current={active ? 'page' : undefined}
+                    aria-label={item.label}
+                    title={item.label}
+                  >
+                    <Icon aria-hidden="true" />
+                    <span>{item.label}</span>
+                  </a>
+                )
+              })}
+            </div>
+          ))}
+
+          <div className="nav-spacer" />
+
+          <div className="sidebar-foot">
+            <div className={`gateway ${bifrostOk === false ? 'off' : ''}`} title="Bifrost gateway connectivity">
+              <span className="dot" />
+              <span className="gateway-label">
+                Bifrost {bifrostOk === null ? 'checking' : bifrostOk ? 'gateway online' : 'gateway offline'}
+              </span>
+            </div>
+            <div className="sidebar-note">
+              Extends{' '}
+              <a href="https://github.com/maximhq/bifrost" target="_blank" rel="noreferrer">
+                Bifrost OSS ↗
+              </a>
+              <br />
+              Problem #04 · Geek Room × Bifrost
+            </div>
+          </div>
+        </aside>
+
+        <div className="main">
+          <header className="topbar">
+            <span className="crumb">
+              Bifrost Priority Track <span className="sep">/</span> <b>{PAGE_LABELS[page]}</b>
+            </span>
+            <span className="topbar-spacer" />
+            <span className="live" title="The console refreshes every 10 seconds">
+              <span className={`live-dot ${bifrostOk === false ? 'off' : ''}`} />
+              {liveLabel}
+            </span>
+            <span className="topbar-divider" />
+            <button className="icon-btn" onClick={refresh} aria-label="Refresh console data" title="Refresh now">
+              <RefreshCw size={13} aria-hidden="true" />
             </button>
-          )
-        })}
+          </header>
 
-        <div className="sidebar-foot">
-          <button className="btn btn-ghost btn-sm" onClick={reseed} disabled={reseeding}>
-            <Database size={13} /> {reseeding ? 'Reseeding…' : 'Reseed demo data'}
-          </button>
-          <div className="powered">
-            Extends <b>Bifrost OSS</b> — the Apache-2.0 AI gateway by Maxim.<br />
-            Problem Statement <b>#04</b> · Geek Room × Bifrost Priority Track
-            <a href="https://github.com/maximhq/bifrost" target="_blank" rel="noreferrer"
-               style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 6, color: 'var(--violet)' }}>
-              maximhq/bifrost <ExternalLink size={10} />
-            </a>
-          </div>
+          <main className="content" id="main-content" tabIndex={-1}>
+            <div className="content-inner">
+              <Active
+                refreshKey={refreshKey}
+                onReseed={reseed}
+                reseeding={reseeding}
+              />
+            </div>
+          </main>
         </div>
-      </aside>
-
-      <div className="main">
-        <header className="topbar">
-          <span className="crumb">Bifrost <b>Priority Track</b></span>
-          <span className="topbar-title">{TITLES[page]}</span>
-          <span className="topbar-spacer" />
-          <span className="status-pill" title="Bifrost gateway connectivity">
-            <span className={`status-dot ${bifrostOk === false ? 'off' : ''}`} />
-            Bifrost {bifrostOk === null ? '…' : bifrostOk ? 'online · :8080' : 'offline'}
-          </span>
-          <button className="btn btn-ghost btn-sm" onClick={() => setRefreshKey((k) => k + 1)} title="Refresh now">
-            <RefreshCw size={13} />
-          </button>
-        </header>
-
-        <main className="content">
-          <div className="content-inner">
-            <Active refreshKey={refreshKey} />
-          </div>
-        </main>
       </div>
 
-      {toastMsg && <div className="toast">{toastMsg}</div>}
-    </div>
+      {toastMsg && <div className="toast" role="status" aria-live="polite">{toastMsg}</div>}
+    </>
   )
 }
