@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowRight } from 'lucide-react'
+import { ArrowRight, Flame, Loader2 } from 'lucide-react'
 import { api, fmtUsd } from '../api'
+import { AreaChart } from '../components/charts'
 import { EmptyState, Loading, PageHeader, monogram } from '../components/ui'
 
 const TARGETS = ['gpt-4o-mini', 'gpt-4.1-mini', 'gpt-5-mini', 'claude-3-5-haiku', 'deepseek-chat', 'mistral-small', 'gemini-2.0-flash']
@@ -15,6 +16,10 @@ export default function Simulator({ refreshKey }) {
   const [resultError, setResultError] = useState('')
   const [recos, setRecos] = useState([])
   const [recoTotal, setRecoTotal] = useState(0)
+  const [stressMult, setStressMult] = useState(2)
+  const [stressing, setStressing] = useState(false)
+  const [stress, setStress] = useState(null)
+  const [stressError, setStressError] = useState('')
 
   useEffect(() => {
     api.keys().then((res) => {
@@ -40,6 +45,19 @@ export default function Simulator({ refreshKey }) {
       setResultError(e.message)
     }
   }, [vk, fromModel, toModel, shift])
+
+  const runStress = useCallback(async () => {
+    if (!vk) return
+    setStressing(true)
+    setStressError('')
+    try {
+      setStress(await api.stress(vk, stressMult))
+    } catch (e) {
+      setStressError(e.message)
+    } finally {
+      setStressing(false)
+    }
+  }, [vk, stressMult])
 
   useEffect(() => { run() }, [run])
 
@@ -92,6 +110,107 @@ export default function Simulator({ refreshKey }) {
   return (
     <div className="page">
       {header}
+
+      <section className="sheet stress">
+        <div className="sheet-head">
+          <div>
+            <h2 className="sheet-title">Demand stress test</h2>
+            <p className="sheet-sub">Same metered shape, a different demand regime — the trained committee answers</p>
+          </div>
+          <span className="sheet-meta">counterfactual</span>
+        </div>
+
+        <div className="stress-grid">
+          <div className="stress-controls">
+            <div className="field">
+              <label className="control-label" htmlFor="stress-mult">
+                Demand multiplier ·{' '}
+                <b style={{ color: 'var(--ink)' }}>{stressMult.toFixed(2)}×</b>
+              </label>
+              <input
+                id="stress-mult"
+                className="slider"
+                type="range"
+                min={0.5}
+                max={4}
+                step={0.25}
+                value={stressMult}
+                onChange={(e) => setStressMult(Number(e.target.value))}
+              />
+              <div className="slider-scale">
+                <span>0.5×</span>
+                <span>1×</span>
+                <span>2×</span>
+                <span>3×</span>
+                <span>4×</span>
+              </div>
+            </div>
+            <button className="btn btn-accent" onClick={runStress} disabled={stressing || !vk}>
+              {stressing
+                ? <Loader2 className="spin" size={13} aria-hidden="true" />
+                : <Flame size={13} aria-hidden="true" />}
+              {stressing ? 'Rolling the committee…' : 'Run the committee'}
+            </button>
+            <p className="field-hint" style={{ marginTop: 12 }}>
+              Re-runs the trained 24-member committee with this key's trailing buckets scaled by{' '}
+              {stressMult.toFixed(2)}× and forecasts the fleet 24 hours forward. Trees saturate past the
+              envelope they learned — saturation <i>is</i> the answer.
+            </p>
+            {stressError && <div className="form-status bad">Stress test unavailable: {stressError}</div>}
+          </div>
+
+          <div className="stress-output">
+            {!stress ? (
+              <EmptyState
+                title="An unanswered question"
+                detail="Price a demand regime with the same committee that set the p10–p90 band on the Overview. Fleet curve and cap impact under it — before your customers have a bad day."
+              />
+            ) : (
+              <div className="stress-report">
+                <div className="stress-stats">
+                  <div className="calc-cell">
+                    <b>{fmtUsd(stress.baseline.fleet_24h, 0)} → {fmtUsd(stress.stressed.fleet_24h, 0)}</b>
+                    <span>fleet spend · 24h</span>
+                  </div>
+                  <div className="calc-cell">
+                    <b className={stress.delta_pct > 0.5 ? 'bad' : 'good'}>
+                      {stress.delta_pct >= 0 ? '+' : ''}{stress.delta_pct}%
+                    </b>
+                    <span>Δ vs baseline</span>
+                  </div>
+                  <div className="calc-cell">
+                    <b>
+                      {stress.stressed.risk[vk]?.remaining_usd != null
+                        ? fmtUsd(stress.stressed.risk[vk].remaining_usd, 0)
+                        : '—'}
+                    </b>
+                    <span>key remaining cap</span>
+                  </div>
+                </div>
+                <AreaChart data={stress.hourly_all || []} forecast={stress.stressed.curve} />
+                <p className="calc-note">
+                  {(() => {
+                    const r = stress.stressed.risk[vk]
+                    if (!r) return 'Ensemble verdict unavailable for this key.'
+                    const after = Math.round((r.p_24h ?? 0) * 100)
+                    const rb = stress.baseline.risk[vk]
+                    const before = rb ? Math.round((rb.p_24h ?? 0) * 100) : null
+                    return (
+                      <>
+                        Under ×{stress.multiplier.toFixed(2)} demand the committee projects{' '}
+                        {stress.delta_pct >= 0 ? '+' : ''}{stress.delta_pct}% fleet spend in 24h;{' '}
+                        {selected?.name ?? 'this key'}'s paths breach its remaining ${fmtUsd(r.remaining_usd, 0)} cap
+                        in 24h with probability <b>{after}%</b>
+                        {before != null && before !== after ? ` (baseline ${before}%)` : ''}.
+                      </>
+                    )
+                  })()}
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
 
       <div className="sim-grid">
         <section className="sheet" id="sim-calculator">

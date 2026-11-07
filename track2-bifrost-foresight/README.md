@@ -91,14 +91,16 @@ client.chat.completions.create(model="acme-llm/gpt-4o", messages=[{"role": "user
 
 ## Operator console
 
+New to the repo? The 90-second judge track lives in [`docs/DEMO.md`](docs/DEMO.md) — the exact order of operations, and the honest architecture to defend in Q&A.
+
 | Page | What it shows |
 |---|---|
-| **Overview** | Fleet spend today, 6h/24h burn rate, 30-day projection, keys-at-risk, 24h spend chart, per-key budget health with exhaustion countdown |
+| **Overview** | Fleet spend today, 6h/24h burn rate, 30-day projection, keys-at-risk, 24h spend chart + calibrated band, per-key budget health with exhaustion countdown |
 | **Virtual Keys** | Per-key budget bar, burn, projection, trend; edit autopilot policy; arm/release time-boxed model downgrades |
-| **Anomalies** | Same hour-of-day robust z-scores across all keys, plus a trained expectation-head residual scan that flags lower-level drift |
-| **Right-sizing** | What-if simulator: shift X% of traffic from one model to another → projected 30d / 12-month savings; fleet-wide recommendations |
+| **Anomalies** | Robust z across all keys **plus calibrated model residual scan** — the blowout hour reads ~10.9σ vs ~15.8σ |
+| **Right-sizing** | Model-shift simulator + **Demand stress test** — ask the trained committee what ×2–×4 demand does to the fleet's 24h curve and caps |
 | **Live Traffic** | Metered request stream (auto-refresh) + “Fire 8 live requests” to watch tokens land in real time |
-| **Autopilot** | Webhook URL, soft-cap fraction, horizon, anomaly z, pacing window; test-fire the webhook; inspect the built-in webhook sink |
+| **Autopilot** | Webhook URL, soft-cap fraction, horizon, anomaly z, pacing window; test-fire the webhook; webhook sink; **Forecast model card (committee of 24, backtest-calibrated band, ≈19 MB artifact)** |
 
 ![Overview](docs/screenshots/overview.png)
 ![Virtual keys](docs/screenshots/keys.png)
@@ -128,6 +130,7 @@ POST   /api/keys/{vk}/release        # release it early
 GET    /api/anomalies                # robust z + trained model residual scan (11 rows, key names)
 GET    /api/alerts                   # audit trail (policy fires, threshold alerts)
 POST   /api/simulator                # {vk, from_model, to_model, shift_pct}
+POST   /api/simulator/stress         # {vk, multiplier} — committee counterfactual, fleet 24h forward
 GET    /api/recommendations          # fleet right-sizing table
 GET    /api/settings | PUT           # webhook URL + thresholds
 GET    /api/model                    # trained forecaster status, metrics, artifact size
@@ -161,10 +164,29 @@ POST   /api/replay/live              # fire N real requests through the chain
 │   │   ├── pricing.py           # embedded model catalog
 │   │   ├── seed.py              # deterministic 21-day demo fleet
 │   │   └── fakellm.py           # demo upstream (OpenAI-compatible)
-│   └── tests/                   # pytest — engine invariants
+│   └── tests/                   # pytest: 121 tests — units + real-chain E2E + chaos
 ├── frontend/                    # React + Vite console (served at :8400)
 └── scripts/run-demo.ps1         # one-command demo bring-up
 ```
+
+## The test suite proves the demo, not just the code
+
+One command covers everything (Node ≥ 20 required for the gateway tests; they
+stand up their own daemons on throwaway ports and never touch your demo):
+
+```powershell
+cd backend; python -m pytest tests -q
+```
+
+Three layers:
+
+| Layer | What it pins down |
+|---|---|
+| **Units** (115) | forecaster math, anomaly z-scores, pricing catalog, meter extraction (incl. legacy + streaming), policy gates, SQLite store, offline model artifacts |
+| **Real-chain E2E** (6) | starts fakellm + the actual `@maximhq/bifrost` binary + Foresight itself as live processes, then proves a request is relayed, **metered exactly, priced and attributed** through all three hops — including SSE streaming and Bifrost's own VK enforcement |
+| **Chaos** (5) | kills the upstream mid-stream (partial usage is still metered, the proxy never wedges), kills the gateway (clean fail-fast 502 on both JSON and SSE paths, console keeps rendering, `bifrost_reachable` flips to False), and bursts 8 concurrent requests against a live console read |
+
+Notable sleeps-free guarantees: failures are never priced (`x-foresight-cost-usd` is absent on 5xx), failed calls never create phantom usage rows, and the console keeps rendering a dark gateway. Everything runs on random free ports with throwaway SQLite DBs (`FORESIGHT_DB_PATH`), so the suite is safe to run next to a live demo.
 
 ## Extending Bifrost upstream
 

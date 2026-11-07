@@ -28,8 +28,9 @@ function clock(ts) {
   })
 }
 
-export function AreaChart({ data, forecast }) {
+export function AreaChart({ data, forecast, paths }) {
   const [hover, setHover] = useState(null)
+  const [showChoir, setShowChoir] = useState(true)
 
   const chart = useMemo(() => {
     if (!data || data.length === 0) return null
@@ -57,6 +58,20 @@ export function AreaChart({ data, forecast }) {
       : null
     // Band polygon: p90 forward, then p10 reversed, anchored at the "now" divider.
     const hasBand = !!fc && fc.every((d) => Number.isFinite(Number(d.p10)) && Number.isFinite(Number(d.p90)))
+    // One faint vermilion strand per bootstrap member.
+    const strandPaths =
+      fc && paths && paths.length
+        ? paths
+            .filter((member) => Array.isArray(member))
+            .map((member) => {
+              const pts = [histPoints[histPoints.length - 1]]
+              for (let k = 0; k < member.length && k < points.length - histLen; k++) {
+                pts.push([points[histLen + k][0], y(Number(member[k]) || 0)])
+              }
+              return pts.map(([px, py], i) => `${i === 0 ? 'M' : 'L'}${px.toFixed(1)},${py.toFixed(1)}`).join(' ')
+            })
+            .filter(Boolean)
+        : null
     let bandPath = null
     if (hasBand) {
       const fut = points.slice(histLen)
@@ -80,9 +95,9 @@ export function AreaChart({ data, forecast }) {
     const ticks = [0, yMax / 2, yMax]
     return {
       points, line, area, yMax, innerW, innerH, x, y, ticks, peakIndex, baseline,
-      histLen, forecastPath, bandPath, nowX: fc ? x(histLen - 1) : null,
+      histLen, forecastPath, bandPath, strandPaths, nowX: fc ? x(histLen - 1) : null,
     }
-  }, [data, forecast])
+  }, [data, forecast, paths])
 
   if (!chart || !data || data.length === 0) {
     return <div className="empty">No usage in this window yet.</div>
@@ -159,6 +174,14 @@ export function AreaChart({ data, forecast }) {
         )}
 
         {chart.bandPath && <path className="band" d={chart.bandPath} />}
+
+        {chart.strandPaths && showChoir && (
+          <g className="choir" aria-hidden="true">
+            {chart.strandPaths.map((d, i) => (
+              <path key={i} d={d} />
+            ))}
+          </g>
+        )}
 
         <path className="area" d={chart.area} />
         <path className="line" d={chart.line} />
@@ -245,7 +268,7 @@ export function AreaChart({ data, forecast }) {
               [0, '24h ago', 'start'],
               [Math.floor((chart.histLen - 1) / 2), '12h ago', 'middle'],
               [chart.histLen - 1, 'now', 'middle'],
-              [chart.points.length - 1, '+12h', 'end'],
+              [chart.points.length - 1, `+${forecast?.length ?? 12}h`, 'end'],
             ].map(([index, label, anchor], i) => (
               <text
                 key={i}
@@ -278,6 +301,18 @@ export function AreaChart({ data, forecast }) {
         <span className="chart-legend"><span className="swatch" /> Hourly spend</span>
         {chart.bandPath && (
           <span className="chart-legend"><span className="swatch band" /> p10–p90</span>
+        )}
+        {chart.strandPaths && (
+          <button
+            type="button"
+            className="chart-legend choir-toggle"
+            data-on={showChoir}
+            onClick={() => setShowChoir((v) => !v)}
+            aria-pressed={showChoir}
+            title="Each translucent vermilion strand is one bootstrap member of the trained committee"
+          >
+            <span className="swatch choir" /> Choir · {chart.strandPaths.length}
+          </button>
         )}
         {chart.forecastPath && (
           <span className="chart-legend"><span className="swatch dash" /> Model median</span>

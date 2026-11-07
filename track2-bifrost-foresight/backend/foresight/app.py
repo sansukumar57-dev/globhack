@@ -22,6 +22,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 from . import anomaly as anomaly_mod
 from . import forecast as forecast_mod
@@ -337,6 +338,7 @@ async def api_overview():
     model_forecast = intel["forecast"] if intel else None
     model_meta = intel["forecast_meta"] if intel else None
     model_risk = intel["risk"] if intel else None
+    model_paths = intel.get("paths") if intel else None
     today_start = now - (now % 86400)
     return {
         "generated_at": now,
@@ -357,6 +359,7 @@ async def api_overview():
         "model_forecast": model_forecast,
         "model_meta": model_meta,
         "model_risk": model_risk,
+        "model_paths": model_paths,
         "top_models": store.model_breakdown(None, now - WINDOW_S)[:6],
         "recent_alerts": store.list_alerts(5),
     }
@@ -511,6 +514,35 @@ async def api_simulator(request: Request):
         if key["budget_usd"] else None,
         "suggestion": suggest_downgrade(from_model),
     }
+
+
+class StressRequest(BaseModel):
+    vk: str
+    multiplier: float = 2.0
+
+
+@app.post("/api/simulator/stress")
+def api_simulator_stress(body: StressRequest):
+    """Counterfactual rollout through the trained committee.
+
+    "What if key <vk> spent <multiplier>x its current spend shape?" — every
+    member re-runs with the target key's trailing buckets scaled, and the
+    response reports the fleet curve and per-key breach metrics under both
+    demand regimes. Synchronous on purpose: FastAPI runs it in the threadpool,
+    off the event loop.
+    """
+    key = store.get_key(body.vk)
+    if not key:
+        raise HTTPException(status_code=404, detail="Unknown virtual key")
+    out = model_mod.stress_projection(body.vk, body.multiplier)
+    if out is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Stress test unavailable — the trained model is not loaded (try /api/model/train).",
+        )
+    now = time.time()
+    out["hourly_all"] = store.hourly_series(None, now - 24 * 3600, now)
+    return out
 
 
 @app.get("/api/recommendations")

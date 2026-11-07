@@ -176,7 +176,7 @@ export default function Overview({ refreshKey, onReseed, reseeding }) {
               </span>
             </div>
             <div className="sheet-body">
-              <AreaChart data={data.hourly_all} forecast={data.model_forecast} />
+              <AreaChart data={data.hourly_all} forecast={data.model_forecast} paths={data.model_paths} />
             </div>
           </section>
 

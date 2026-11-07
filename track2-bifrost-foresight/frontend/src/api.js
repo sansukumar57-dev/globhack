@@ -30,6 +30,8 @@ export const api = {
   recommendations: () => req('/api/recommendations'),
   model: () => req('/api/model'),
   trainModel: () => req('/api/model/train', { method: 'POST', body: '{}' }),
+  stress: (vk, multiplier) =>
+    req('/api/simulator/stress', { method: 'POST', body: JSON.stringify({ vk, multiplier }) }),
   getSettings: () => req('/api/settings'),
   putSettings: (patch) => req('/api/settings', { method: 'PUT', body: JSON.stringify(patch) }),
   testWebhook: () => req('/api/settings/test-webhook', { method: 'POST', body: '{}' }),

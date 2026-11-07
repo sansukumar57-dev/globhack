@@ -127,6 +127,27 @@ def test_anomaly_scan_flags_spike(trained):
     assert top["model_z"] >= scored[-1]["model_z"]  # sorted descending
 
 
+def test_stress_projection_counterfactual(trained):
+    series = trained["series"]
+    now = trained["now"]
+    budgets = {"sk-a": 8000.0, "sk-b": 10000.0}
+
+    out = model_mod.stress_projection(
+        "sk-a", 3.0, steps=12, series_by_key=series, now=now, budgets=budgets,
+    )
+    assert out is not None
+    assert out["stressed"]["fleet_24h"] > out["baseline"]["fleet_24h"]
+    assert out["delta_pct"] > 0.0
+    assert "remaining_usd" in out["stressed"]["risk"]["sk-a"]
+    assert out["stressed"]["curve"][0]["p10"] <= out["stressed"]["curve"][0]["cost"] <= out["stressed"]["curve"][0]["p90"]
+
+    tiny = model_mod.stress_projection(
+        "sk-a", 0.25, steps=12, series_by_key=series, now=now, budgets=budgets,
+    )
+    assert tiny is not None
+    assert tiny["stressed"]["fleet_24h"] < tiny["baseline"]["fleet_24h"]
+
+
 def test_fallback_without_artifact(monkeypatch):
     from pathlib import Path
     tmp_dir = Path(__file__).resolve().parent.parent / ".test_tmp"

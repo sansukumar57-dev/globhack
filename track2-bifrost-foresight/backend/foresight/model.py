@@ -41,6 +41,16 @@ _intel_cache: dict[str, Any] = {"ts": 0.0, "key": None, "data": None}
 _scan_cache: dict[str, Any] = {"ts": 0.0, "key": None, "data": None}
 _intel_build = {"running": False}
 _scan_build = {"running": False}
+_stress_cache: dict[str, Any] = {"ts": 0.0, "key": None, "data": None}
+
+
+def _percentile(sorted_vals: list[float], p: float) -> float:
+    if not sorted_vals:
+        return 0.0
+    k = (len(sorted_vals) - 1) * p
+    f = math.floor(k)
+    c = min(f + 1, len(sorted_vals) - 1)
+    return sorted_vals[f] + (sorted_vals[c] - sorted_vals[f]) * (k - f)
 
 
 def _mtime() -> float:
@@ -431,6 +441,136 @@ def _member_paths(member, states: list[dict[str, Any]], now_hour: int,
     return totals, per_key
 
 
+def _rollout(states: list[dict[str, Any]], members: list, now_hour: int,
+             total_steps: int) -> list[tuple[list[float], dict[str, list[float]]]]:
+    """Run the recursive rollout for every member, concurrently.
+
+    Returns one (fleet path, per-key paths) tuple per member, in the same
+    order as `members`.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _run_member(member):
+        member_states = [{k: (list(v) if isinstance(v, list) else v) for k, v in s.items()}
+                         for s in states]
+        return _member_paths(member, member_states, now_hour, total_steps)
+
+    if len(members) > 1:
+        with ThreadPoolExecutor(max_workers=min(4, len(members))) as pool:
+            return list(pool.map(_run_member, members))
+    return [_run_member(members[0])]
+
+
+def stress_projection(stress_vk: str, multiplier: float, *,
+                      steps: int = 24,
+                      series_by_key: dict[str, list[dict[str, Any]]] | None = None,
+                      budgets: dict[str, float] | None = None,
+                      now: float | None = None) -> dict[str, Any] | None:
+    """Counterfactual rollout: "what if `stress_vk` ran at `multiplier`× its
+    current spend shape?".
+
+    Only the *recursive history* the target key sees is scaled; metered history
+    and remaining-cap figures always use the unscaled metered data. Returns the
+    fleet curve (p50 median + p10–p90 band) and per-key breach probabilities
+    under both demand regimes. None when no artifact exists.
+    """
+    try:
+        art = load()
+        if art is None:
+            return None
+        multiplier = max(0.1, min(8.0, float(multiplier or 1.0)))
+        now = time.time() if now is None else now
+        now_hour = int(now // 3600) * 3600
+        known_keys = list(art["keys"])
+        if stress_vk not in known_keys:
+            return None
+        key_ids = {vk: i for i, vk in enumerate(known_keys)}
+
+        cache_key = (now_hour, round(_mtime(), 3), stress_vk, round(multiplier, 4), steps)
+        live = series_by_key is None and budgets is None
+        if live:
+            if _stress_cache["key"] == cache_key and now - _stress_cache["ts"] < CACHE_TTL_SECONDS:
+                return _stress_cache["data"]
+            from . import store
+            budgets = {k["vk"]: float(k.get("budget_usd") or 0.0) for k in store.list_keys()}
+        else:
+            series_by_key = {vk: s for vk, s in (series_by_key or {}).items() if vk in key_ids}
+            budgets = budgets or {}
+
+        def evaluate(scaled: bool) -> dict[str, Any] | None:
+            states = []
+            feed = series_by_key
+            if live:
+                from . import store
+                feed = {vk: store.hourly_series(vk, now_hour - 30 * 86400, now) for vk in known_keys}
+            for vk in known_keys:
+                series = (feed or {}).get(vk)
+                if not series:
+                    continue
+                costs = [float(b["cost"] or 0.0) for b in series]
+                if not costs or sum(costs) <= 0.0 or sum(costs[-36:]) <= 0.0:
+                    continue
+                known = list(costs)
+                if scaled and vk == stress_vk:
+                    known = [c * multiplier for c in costs]
+                states.append({"vk": vk, "key_id": key_ids[vk], "known": known,
+                               "history": costs})
+            if not states:
+                return None
+            rollout = _rollout(states, art["committee"], now_hour, steps)
+            fleet_paths = [r[0] for r in rollout]
+            key_member_paths = {s["vk"]: [r[1][s["vk"]] for r in rollout] for s in states}
+            band_q = art.get("band_q80") or []
+
+            pts = []
+            for j in range(steps):
+                vals = sorted(p[j] for p in fleet_paths)
+                median = _percentile(vals, 0.5)
+                half_spread = max(_percentile(vals, 0.9) - median, median - _percentile(vals, 0.1))
+                width = half_spread
+                if j < len(band_q) and band_q[j] is not None:
+                    width = max(width, float(band_q[j]))
+                pts.append({
+                    "hour": now_hour + (j + 1) * 3600,
+                    "cost": round(median, 4),
+                    "p10": round(max(median - width, 0.0), 4),
+                    "p90": round(median + width, 4),
+                })
+            fleet = sum(p["cost"] for p in pts)
+            risk = {}
+            for s in states:
+                vk = s["vk"]
+                budget = float(budgets.get(vk) or 0.0)
+                if budget <= 0:
+                    continue
+                history = s["history"]
+                remaining = budget - sum(history[-24 * 30:])
+                cums = sorted(sum(p[:steps]) for p in key_member_paths[vk])
+                median_cum = cums[len(cums) // 2]
+                breaches = sum(1 for c in cums if c >= remaining) if remaining > 0 else len(cums)
+                risk[vk] = {"remaining_usd": round(remaining, 2),
+                            "median_cum": round(median_cum, 2),
+                            f"p_{steps}h": round(breaches / len(cums), 3)}
+            return {"curve": pts, "fleet_24h": round(fleet, 2), "risk": risk}
+
+        base = evaluate(False)
+        stressed = evaluate(True)
+        if base is None or stressed is None:
+            return None
+        out = {
+            "multiplier": multiplier, "stress_vk": stress_vk, "steps": steps,
+            "algorithm": art["algorithm"], "committee": art.get("committee_size"),
+            "baseline": base, "stressed": stressed,
+            "delta_fleet_24h": round(stressed["fleet_24h"] - base["fleet_24h"], 2),
+            "delta_pct": round(stressed["fleet_24h"] / max(base["fleet_24h"], 1e-9) * 100 - 100, 1),
+        }
+        if live:
+            _stress_cache.update(ts=now, key=cache_key, data=out)
+        return out
+    except Exception:
+        return None
+
+
 def intelligence(steps: int = 12, *, horizon: int = 48,
                  series_by_key: dict[str, list[dict[str, Any]]] | None = None,
                  budgets: dict[str, float] | None = None,
@@ -474,33 +614,12 @@ def intelligence(steps: int = 12, *, horizon: int = 48,
 
         # Warm the recursion once per member, capped at what the heads were trained for.
         total_steps = min(max(steps, horizon), int(art.get("max_horizon_steps", 48)))
-        # Members are independent — evaluate them concurrently (sklearn releases the GIL).
-        from concurrent.futures import ThreadPoolExecutor
-
-        def _run_member(member):
-            member_states = [{k: (list(v) if isinstance(v, list) else v) for k, v in s.items()}
-                             for s in states]
-            return _member_paths(member, member_states, now_hour, total_steps)
-
-        fleet_paths: list[list[float]] = []
-        if len(art["committee"]) > 1:
-            with ThreadPoolExecutor(max_workers=min(4, len(art["committee"]))) as pool:
-                results = list(pool.map(_run_member, art["committee"]))
-        else:
-            results = [_run_member(art["committee"][0])]
+        rollout = _rollout(states, art["committee"], now_hour, total_steps)
+        fleet_paths: list[list[float]] = [r[0] for r in rollout]   # member -> fleet total per step
         key_member_paths: dict[str, list[list[float]]] = {s["vk"]: [] for s in states}
-        for totals_fn, per_key in results:
-            fleet_paths.append(totals_fn)
+        for _totals, per_key in rollout:
             for vk, path in per_key.items():
                 key_member_paths[vk].append(path)
-
-        def _percentile(sorted_vals: list[float], p: float) -> float:
-            if not sorted_vals:
-                return 0.0
-            k = (len(sorted_vals) - 1) * p
-            f = math.floor(k)
-            c = min(f + 1, len(sorted_vals) - 1)
-            return sorted_vals[f] + (sorted_vals[c] - sorted_vals[f]) * (k - f)
 
         band_q = art.get("band_q80") or []
         points = []
@@ -559,7 +678,8 @@ def intelligence(steps: int = 12, *, horizon: int = 48,
             "keys_used": len(states),
             "horizon": horizon,
         }
-        data = {"forecast": points, "forecast_meta": meta, "risk": risk}
+        data = {"forecast": points, "forecast_meta": meta, "risk": risk,
+                "paths": [p[:steps] for p in fleet_paths]}
         if live:
             _intel_cache.update(ts=now, key=cache_key, data=data)
         return data

@@ -1658,7 +1658,7 @@ a.sheet-meta:hover { color: var(--accent-ink); }
 }
 
 @media (max-width: 1080px) {
-  .overview-grid, .sim-grid, .settings-grid { grid-template-columns: 1fr; }
+  .overview-grid, .sim-grid, .settings-grid, .stress-grid { grid-template-columns: 1fr; }
   .overview-side { display: grid; grid-template-columns: 1fr 1fr; align-items: start; }
   .overview-side > :last-child { grid-column: 1 / -1; }
 }
@@ -1773,4 +1773,72 @@ a.sheet-meta:hover { color: var(--accent-ink); }
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* ============================================================ choir */
+.chart .choir { pointer-events: none; }
+.chart .choir path {
+  stroke: var(--accent);
+  opacity: 0.2;
+  stroke-width: 0.7;
+  fill: none;
+}
+.choir-toggle {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-size: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.choir-toggle[data-on="false"] { opacity: 0.4; }
+.chart-legend .swatch.choir {
+  background: repeating-linear-gradient(115deg, var(--accent) 0 1.5px, transparent 1.5px 4px);
+}
+
+/* ================================================= stress test */
+.stress { margin-bottom: 18px; }
+.stress-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+  gap: 22px;
+  align-items: start;
+  padding: 18px 20px 20px;
+}
+.stress-controls .btn { width: 100%; justify-content: center; margin-top: 4px; }
+.stress-output { min-width: 0; }
+.stress-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.stress-stats .calc-cell {
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 10px 12px;
+  background: var(--paper-2);
+}
+.stress-stats .calc-cell b {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 3px;
+  word-break: break-word;
+}
+.stress-stats .calc-cell b.bad { color: var(--accent-ink); }
+.stress-stats .calc-cell b.good { color: #276749; }
+.stress-stats .calc-cell span {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+@media (max-width: 900px) {
+  .stress-grid { grid-template-columns: 1fr; }
+  .stress-stats { grid-template-columns: repeat(3, 1fr); }
 }
