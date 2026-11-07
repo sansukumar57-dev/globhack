@@ -185,7 +185,8 @@ def chain(tmp_path_factory, request):
         client.put("/api/settings", json={"webhook_url": ""})
 
         yield {"client": client, "fake_port": fake_port,
-               "bifrost_port": bif_port, "fg_port": fg_port}
+               "bifrost_port": bif_port, "fg_port": fg_port,
+               "procs": {"fakellm": procs[0], "bifrost": procs[1], "foresight": procs[2]}}
     finally:
         for p in reversed(procs):
             _kill(p)

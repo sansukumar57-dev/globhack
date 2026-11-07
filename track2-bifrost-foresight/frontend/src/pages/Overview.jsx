@@ -172,7 +172,9 @@ export default function Overview({ refreshKey, onReseed, reseeding }) {
                 </p>
               </div>
               <span className="sheet-meta">
-                {data.model_meta ? `${data.model_meta.keys_used} keys · +${data.model_meta.hours}h · ×${data.model_meta.committee} ` : ''}1h buckets
+                {data.model_meta
+                  ? `${data.model_meta.keys_used} keys · +${data.model_meta.hours}h · committee ×${data.model_meta.committee}`
+                  : '1h buckets'}
               </span>
             </div>
             <div className="sheet-body">

@@ -1840,5 +1840,5 @@ a.sheet-meta:hover { color: var(--accent-ink); }
 }
 @media (max-width: 900px) {
   .stress-grid { grid-template-columns: 1fr; }
-  .stress-stats { grid-template-columns: repeat(3, 1fr); }
+  .stress-stats { grid-template-columns: 1fr; }
 }

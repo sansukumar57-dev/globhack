@@ -123,7 +123,7 @@ export default function Anomalies({ refreshKey }) {
               <h2 className="sheet-title">Model residual scan</h2>
               <p className="sheet-sub">Trained expectation head · (actual − expected) / σ over the last 48h</p>
             </div>
-            <span className="sheet-meta">residual σ = {data.model_sigma}</span>
+            <span className="sheet-meta">residual σ = {data.model_sigma != null ? Number(data.model_sigma).toFixed(3) : '—'}</span>
           </div>
           <div className="table-wrap">
             <table className="table">
