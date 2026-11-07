@@ -67,20 +67,26 @@ app = FastAPI(
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=False,
                    allow_methods=["*"], allow_headers=["*"])
 
-_bifrost_probe: dict[str, Any] = {"ts": 0.0, "ok": False}
+_bifrost_probe: dict[str, Any] = {"ts": 0.0, "ok": False, "admin_locked": None}
 
 
 async def bifrost_reachable() -> bool:
     if time.time() - _bifrost_probe["ts"] < 5.0:
         return _bifrost_probe["ok"]
     ok = False
+    locked = None
     try:
         async with httpx.AsyncClient(timeout=1.5) as client:
             resp = await client.get(f"{BIFROST_URL}/api/config")
-            ok = resp.status_code < 500
+            # Bifrost v2.5 locks its admin /api surface until a first admin account
+            # exists; 403 means "alive, surface locked" — that is not a real outage.
+            if resp.status_code < 500:
+                ok = True
+                locked = resp.status_code == 403
     except Exception:
         ok = False
-    _bifrost_probe.update(ts=time.time(), ok=ok)
+        locked = None
+    _bifrost_probe.update(ts=time.time(), ok=ok, admin_locked=locked)
     return ok
 
 
@@ -324,6 +330,7 @@ async def models_proxy(request: Request):
 async def api_health():
     return {"status": "ok", "service": "bifrost-foresight", "version": "0.1.0",
             "bifrost_url": BIFROST_URL, "bifrost_reachable": await bifrost_reachable(),
+            "bifrost_admin_locked": _bifrost_probe.get("admin_locked"),
             "forecaster_loaded": model_mod.load() is not None}
 
 

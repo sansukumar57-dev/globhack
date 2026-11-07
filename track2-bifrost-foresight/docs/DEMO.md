@@ -55,3 +55,6 @@ Everything below works at `http://localhost:8400` with the demo processes runnin
 - **Trees saturate** past the envelope they trained on — the saturation in the stress panel is
   the feature, not a bug; in production you watch for it with drift monitors.
 - **Seeded fleet** is simulated shape; metering, pricing, policy, and the ML path are real.
+- **Admin /api is locked by design** — the Bifrost startup log says so: v2.5 hides its admin
+  surface until `setup_token` + a first admin account exist. Foresight never calls admin routes;
+  it lives entirely on inference `/v1/*` with inference auth. Locked is correct and safe for the demo.
