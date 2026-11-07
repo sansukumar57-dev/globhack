@@ -95,7 +95,7 @@ client.chat.completions.create(model="acme-llm/gpt-4o", messages=[{"role": "user
 |---|---|
 | **Overview** | Fleet spend today, 6h/24h burn rate, 30-day projection, keys-at-risk, 24h spend chart, per-key budget health with exhaustion countdown |
 | **Virtual Keys** | Per-key budget bar, burn, projection, trend; edit autopilot policy; arm/release time-boxed model downgrades |
-| **Anomalies** | Same hour-of-day robust z-scores across all keys; seasonality-aware so a 2pm spike is judged against 2pms, not midnight medians |
+| **Anomalies** | Same hour-of-day robust z-scores across all keys, plus a trained expectation-head residual scan that flags lower-level drift |
 | **Right-sizing** | What-if simulator: shift X% of traffic from one model to another → projected 30d / 12-month savings; fleet-wide recommendations |
 | **Live Traffic** | Metered request stream (auto-refresh) + “Fire 8 live requests” to watch tokens land in real time |
 | **Autopilot** | Webhook URL, soft-cap fraction, horizon, anomaly z, pacing window; test-fire the webhook; inspect the built-in webhook sink |
@@ -109,7 +109,7 @@ client.chat.completions.create(model="acme-llm/gpt-4o", messages=[{"role": "user
 
 - **Rolling 30-day windows**, same semantics as Bifrost's `reset_duration` budgets.
 - Burn rate reported over 1h/6h/24h; exhaustion ETA uses the higher of the 6h and 24h rates, so a spike still counts after it leaves the short window: `eta = (budget − spent) / max(burn₆ₕ, burn₂₄ₕ)`.
-- **Trained spend forecaster** (`foresight/model.py`): gradient-boosted trees over hour-of-day, day-of-week, per-key spend lags (1h/24h/168h) and rolling means, trained on the gateway's own metered buckets via `POST /api/model/train`. The artifact is a few hundred KB — deliberately far under a 100 MB budget — and drives the dashed next-12h projection on the Overview chart with time-ordered validation against a naive same-hour-last-week baseline (`MAE $0.20/h` vs `$0.21/h` naive in the demo data). Governance ETAs stay statistical by design; no artifact / no sklearn simply falls back.
+- **Trained spend intelligence** (`foresight/model.py`): one artifact, three heads. A bootstrap committee of 24 gradient-boosted regressors over hour-of-day, day-of-week, per-key lags (1h/24h/168h) and rolling means draws the dashed next-12h median and its p10–p90 band — band widths are **backtest-calibrated** with rolling-origin 24h forecasts (81% coverage on held-out rollouts, MAE $0.18/h vs $0.20/h naive). The same committee paths imply a per-key **ensemble breach probability** against the remaining soft-cap budget inside the alert horizon. A deeper expectation head scores every recent hour as (actual − expected)/σ on the Anomalies desk (it flags the demo's blowout hour at ~16σ alongside the robust-z read). Artifact ≈ 19 MB — comfortably under the 100 MB budget. Governance ETAs stay statistical by design; no artifact / no sklearn falls back to the burn-rate path.
 - Anomaly detection: per key, per hour-of-day slot, robust z via median/MAD over the trailing 21 days — tight enough that business-hour traffic never hides behind overnight baselines.
 - Trend: least-squares slope of daily totals per key; stability via coefficient of variation over 14 days.
 - Alerting has per-`(key, kind)` cooldowns so a breaching key pages once per window, not once per request.
@@ -125,13 +125,13 @@ GET    /api/keys                     # full per-key forecast payloads
 PATCH  /api/keys/{vk}                # budget_usd, policy, downgrade_to
 POST   /api/keys/{vk}/downgrade      # arm a time-boxed model downgrade
 POST   /api/keys/{vk}/release        # release it early
-GET    /api/anomalies                # recomputed per request against 21d baseline
+GET    /api/anomalies                # robust z + trained model residual scan (11 rows, key names)
 GET    /api/alerts                   # audit trail (policy fires, threshold alerts)
 POST   /api/simulator                # {vk, from_model, to_model, shift_pct}
 GET    /api/recommendations          # fleet right-sizing table
 GET    /api/settings | PUT           # webhook URL + thresholds
 GET    /api/model                    # trained forecaster status, metrics, artifact size
-POST   /api/model/train              # retrain on the live metered history (CPU, seconds)
+POST   /api/model/train              # retrain the committee on live metering (CPU, ~2.5 min)
 POST   /api/settings/test-webhook    # fire a test payload
 GET    /api/webhook-sink             # inspect what your Slack would receive
 POST   /api/seed                     # wipe + reseed the 21-day demo fleet

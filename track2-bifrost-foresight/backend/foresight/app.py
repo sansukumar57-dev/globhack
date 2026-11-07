@@ -9,6 +9,7 @@ One process, three jobs:
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import time
@@ -42,6 +43,17 @@ async def lifespan(app: FastAPI):
     if store.count_since(None, 0) == 0:
         # First boot: load the demo dataset so the console is alive immediately.
         run_seed()
+
+    async def _warm() -> None:
+        try:
+            await asyncio.to_thread(model_mod.intelligence)
+            await asyncio.to_thread(model_mod.anomaly_scan)
+        except Exception:
+            pass
+
+    # Warm the trained model's cache off the critical path — the first
+    # page load after boot shouldn't pay the backtest cost.
+    asyncio.create_task(_warm())
     yield
 
 
@@ -186,36 +198,46 @@ async def chat_completions(request: Request):
 
     is_stream = bool(body.get("stream"))
     start = time.time()
+    # NOTE: no `async with` here — `return StreamingResponse(...)` inside an
+    # async-with closes the client before the SSE body is pumped, which aborts
+    # Bifrost mid-stream (RST) and kills the metering. For streaming, relay()
+    # owns the client and closes it after the stream ends.
+    http_client = httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0))
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0)) as client:
-            if is_stream:
-                req = client.build_request("POST", f"{BIFROST_URL}/v1/chat/completions",
-                                           json=body, headers=fwd_headers)
-                upstream = await client.send(req, stream=True)
-                collected = bytearray()
+        if is_stream:
+            req = http_client.build_request("POST", f"{BIFROST_URL}/v1/chat/completions",
+                                            json=body, headers=fwd_headers)
+            upstream = await http_client.send(req, stream=True)
+            collected = bytearray()
 
-                async def relay():
+            async def relay():
+                try:
                     async for chunk in upstream.aiter_bytes():
                         collected.extend(chunk)
                         yield chunk
                     await upstream.aclose()
-                    await _meter_streamed(vk, body, bytes(collected), start, key, now)
+                except httpx.HTTPError:
+                    pass  # upstream died mid-stream — meter whatever arrived below
+                await _meter_streamed(vk, body, bytes(collected), start, key, now)
+                await http_client.aclose()
 
-                return StreamingResponse(relay(), status_code=upstream.status_code,
-                                         media_type="text/event-stream",
-                                         headers={"Cache-Control": "no-cache",
-                                                  "X-Foresight-Action": action,
-                                                  "X-Foresight-Reason": reason,
-                                                  "X-Foresight-Streamed": "1"})
+            return StreamingResponse(relay(), status_code=upstream.status_code,
+                                     media_type="text/event-stream",
+                                     headers={"Cache-Control": "no-cache",
+                                              "X-Foresight-Action": action,
+                                              "X-Foresight-Reason": reason,
+                                              "X-Foresight-Streamed": "1"})
 
-            upstream = await client.post(f"{BIFROST_URL}/v1/chat/completions",
-                                         json=body, headers=fwd_headers)
+        upstream = await http_client.post(f"{BIFROST_URL}/v1/chat/completions",
+                                          json=body, headers=fwd_headers)
     except httpx.ConnectError:
+        await http_client.aclose()
         return JSONResponse(status_code=502, content={
             "error": {"message": f"Foresight could not reach Bifrost at {BIFROST_URL}. "
                                  "Start the gateway (see README quickstart).",
                       "type": "foresight_upstream_unreachable"}})
     except Exception as exc:
+        await http_client.aclose()
         return JSONResponse(status_code=502, content={
             "error": {"message": f"Upstream error: {exc}", "type": "foresight_upstream_error"}})
 
@@ -238,6 +260,7 @@ async def chat_completions(request: Request):
     resp_headers["x-foresight-reason"] = reason
     if upstream_json is not None and upstream.status_code < 400:
         resp_headers["x-foresight-cost-usd"] = f"{cost_usd(str(body.get('model', 'unknown')), pt, ct):.6f}"
+    await http_client.aclose()   # upstream was fully consumed; release the pool
     return JSONResponse(status_code=upstream.status_code, content=upstream_json if upstream_json is not None else {"raw": upstream.text},
                         headers=resp_headers)
 
@@ -310,7 +333,10 @@ async def api_overview():
     payloads = [_key_payload(k, now) for k in keys]
     statuses = [p["status"] for p in payloads]
     hourly_all = store.hourly_series(None, now - 24 * 3600, now)
-    model_forecast, model_meta = model_mod.fleet_forecast()
+    intel = model_mod.intelligence_cached()
+    model_forecast = intel["forecast"] if intel else None
+    model_meta = intel["forecast_meta"] if intel else None
+    model_risk = intel["risk"] if intel else None
     today_start = now - (now % 86400)
     return {
         "generated_at": now,
@@ -330,6 +356,7 @@ async def api_overview():
         "hourly_all": hourly_all,
         "model_forecast": model_forecast,
         "model_meta": model_meta,
+        "model_risk": model_risk,
         "top_models": store.model_breakdown(None, now - WINDOW_S)[:6],
         "recent_alerts": store.list_alerts(5),
     }
@@ -423,7 +450,16 @@ async def api_anomalies():
             out.append({"vk": vk, "key_name": key["name"], "team": key["team"],
                         "color": key.get("color"), **a})
     out.sort(key=lambda x: x["hour"], reverse=True)
-    return {"anomalies": out[:30], "threshold": threshold, "window_days": 7}
+    names = {k["vk"]: k for k in store.list_keys()}
+    scores = model_mod.anomaly_scan_cached() or []
+    for s in scores:
+        k = names.get(s["vk"])
+        if k:
+            s["key_name"] = k.get("name", s["vk"])
+            s["team"] = k.get("team", "")
+            s["color"] = k.get("color")
+    return {"anomalies": out[:30], "threshold": threshold, "window_days": 7,
+            "model_scores": scores, "model_sigma": model_mod.status().get("anomaly_resid_sigma")}
 
 
 @app.get("/api/alerts")
@@ -511,8 +547,9 @@ async def api_model():
 
 
 @app.post("/api/model/train")
-async def api_model_train():
-    """Train the forecaster on the live metered history. Fast, CPU-only."""
+def api_model_train():
+    """Train the forecaster on the live metered history. Runs in the threadpool:
+    a full committee pass takes long enough that we must not block the loop."""
     try:
         return model_mod.retrain_from_store()
     except (RuntimeError, ValueError) as exc:

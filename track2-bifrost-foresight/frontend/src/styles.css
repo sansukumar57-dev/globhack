@@ -1522,6 +1522,7 @@ a.sheet-meta:hover { color: var(--accent-ink); }
 }
 .chart-legend .swatch.peak { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
 .chart .future-band { fill: rgba(178, 58, 12, 0.035); }
+.chart .band { fill: rgba(178, 58, 12, 0.1); }
 .chart .now-line {
   stroke: var(--rule-strong);
   stroke-width: 1;
@@ -1538,6 +1539,22 @@ a.sheet-meta:hover { color: var(--accent-ink); }
 .chart-legend .swatch.dash {
   background: repeating-linear-gradient(90deg, var(--accent) 0 4px, transparent 4px 7px);
 }
+.chart-legend .swatch.band {
+  width: 14px;
+  height: 8px;
+  border-radius: 2px;
+  background: rgba(178, 58, 12, 0.18);
+}
+.attention-risk {
+  margin-top: 8px;
+  padding-top: 7px;
+  border-top: 1px dashed var(--rule);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.02em;
+  color: var(--accent-ink);
+}
+.attention-risk b { font-weight: 600; color: var(--accent); }
 
 /* ================================================================ states */
 

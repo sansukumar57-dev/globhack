@@ -75,6 +75,11 @@ export default function Overview({ refreshKey, onReseed, reseeding }) {
   const effectiveBurn = Math.max(data.burn_rate_6h, data.burn_rate_24h)
   const alerts = data.recent_alerts || []
   const topModels = data.top_models || []
+  const modelRisk = data.model_risk || {}
+  const riskFor = (k) => {
+    const r = modelRisk[k.vk]
+    return r && (r.p_48h != null || r.p_24h != null) ? r : null
+  }
 
   const conditionSub = critical.length > 0
     ? `${critical[0].name} is at ${Math.round(critical[0].pct_used * 100)}% of budget${atRisk.length > 1 ? ` · ${atRisk.length - 1} more on watch` : ''}.`
@@ -162,12 +167,12 @@ export default function Overview({ refreshKey, onReseed, reseeding }) {
                 <h2 className="sheet-title">Fleet burn</h2>
                 <p className="sheet-sub">
                   {data.model_forecast
-                    ? 'Hourly spend across all virtual keys · solid = metered, dashed = trained model'
+                    ? 'Hourly spend across all virtual keys · solid metered, dashed model median, band p10–p90'
                     : 'Hourly spend across all virtual keys · last 24 hours'}
                 </p>
               </div>
               <span className="sheet-meta">
-                {data.model_meta ? `${data.model_meta.keys_used} keys · +${data.model_meta.hours}h ` : ''}1h buckets
+                {data.model_meta ? `${data.model_meta.keys_used} keys · +${data.model_meta.hours}h · ×${data.model_meta.committee} ` : ''}1h buckets
               </span>
             </div>
             <div className="sheet-body">
@@ -272,6 +277,21 @@ export default function Overview({ refreshKey, onReseed, reseeding }) {
                     {k.stability} burn · {k.trend_pct_per_day >= 0 ? '+' : ''}{k.trend_pct_per_day}%/day trend ·{' '}
                     {k.policy.replace('_', ' ')} policy
                   </div>
+                  {riskFor(k) && (() => {
+                    const r = riskFor(k)
+                    const p = r.p_48h ?? r.p_24h
+                    const cum = r.median_cum_48h ?? r.median_cum_24h
+                    const h = data.model_meta?.horizon ?? 48
+                    return (
+                      <div
+                        className="attention-risk"
+                        title={`Share of trained committee paths whose projected spend crosses ${k.name}'s remaining cap inside ${h}h.`}
+                      >
+                        ensemble paths <b>{fmtUsd(cum, 0)}</b> vs <b>{fmtUsd(r.remaining_usd, 0)}</b> cap ·
+                        breach <b>{Math.round((p ?? 0) * 100)}%</b> / {h}h
+                      </div>
+                    )
+                  })()}
                 </a>
               ))}
             </div>

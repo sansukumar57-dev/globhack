@@ -36,7 +36,10 @@ export function AreaChart({ data, forecast }) {
     const fc = forecast && forecast.length > 0 ? forecast : null
     const all = fc ? [...data, ...fc] : data
     const histLen = data.length
-    const maxCost = Math.max(...all.map((d) => Number(d.cost) || 0), 0.01)
+    const maxCost = Math.max(
+      ...all.map((d) => Math.max(Number(d.cost) || 0, Number(d.p90 ?? 0) || 0)),
+      0.01,
+    )
     const yMax = niceMax(maxCost)
     const innerW = W - PAD.left - PAD.right
     const innerH = H - PAD.top - PAD.bottom
@@ -52,6 +55,22 @@ export function AreaChart({ data, forecast }) {
           .map(([px, py], i) => `${i === 0 ? 'M' : 'L'}${px.toFixed(1)},${py.toFixed(1)}`)
           .join(' ')
       : null
+    // Band polygon: p90 forward, then p10 reversed, anchored at the "now" divider.
+    const hasBand = !!fc && fc.every((d) => Number.isFinite(Number(d.p10)) && Number.isFinite(Number(d.p90)))
+    let bandPath = null
+    if (hasBand) {
+      const fut = points.slice(histLen)
+      const top = [[x(histLen - 1), y(Number(fc[0].p90))]]
+      fut.forEach((pt, k) => top.push([pt[0], y(Number(fc[k].p90))]))
+      const bottom = [...top.slice(1)].reverse().map((_, k) => {
+        const idx = fut.length - 1 - k
+        return [fut[idx][0], y(Number(fc[idx].p10))]
+      })
+      bottom.push([top[0][0], y(Number(fc[0].p10))])
+      bandPath = [...top, ...bottom]
+        .map(([px, py], i) => `${i === 0 ? 'M' : 'L'}${px.toFixed(1)},${py.toFixed(1)}`)
+        .join(' ') + ' Z'
+    }
     const baseline = PAD.top + innerH
     const area = `${line} L${histPoints[histPoints.length - 1][0].toFixed(1)},${baseline} L${histPoints[0][0].toFixed(1)},${baseline} Z`
     let peakIndex = 0
@@ -61,7 +80,7 @@ export function AreaChart({ data, forecast }) {
     const ticks = [0, yMax / 2, yMax]
     return {
       points, line, area, yMax, innerW, innerH, x, y, ticks, peakIndex, baseline,
-      histLen, forecastPath, nowX: fc ? x(histLen - 1) : null,
+      histLen, forecastPath, bandPath, nowX: fc ? x(histLen - 1) : null,
     }
   }, [data, forecast])
 
@@ -86,7 +105,11 @@ export function AreaChart({ data, forecast }) {
     ? (projected(hover) ? (forecast ? forecast[hover - chart.histLen] : null) : data[hover])
     : null
   const hoverText = hoverData
-    ? `${clock(hoverData.hour)} · ${fmtUsd(hoverData.cost)}/h${projected(hover) ? ' · projected' : ''}`
+    ? `${clock(hoverData.hour)} · ${fmtUsd(hoverData.cost)}/h${
+        projected(hover)
+          ? (hoverData.p10 != null ? ` · band ${fmtUsd(hoverData.p10)}–${fmtUsd(hoverData.p90)}` : ' · projected')
+          : ''
+      }`
     : ''
   const hoverWidth = hoverText.length * 5.2 + 16
   const hoverX = hoverPoint
@@ -109,7 +132,7 @@ export function AreaChart({ data, forecast }) {
         className="chart-svg"
         viewBox={`0 0 ${W} ${H}`}
         role="img"
-        aria-label={`Fleet spend over the last 24 hours. Peak ${fmtUsd(peak.cost)} per hour ${timeAgo(peak.hour)}.${chart.forecastPath ? ' Dashed extension shows the trained model projection for the next 12 hours.' : ''}`}
+        aria-label={`Fleet spend over the last 24 hours. Peak ${fmtUsd(peak.cost)} per hour ${timeAgo(peak.hour)}.${chart.forecastPath ? ` Dashed line is the trained model median for the next 12 hours${chart.bandPath ? ', with a p10-p90 band' : ''}.` : ''}`}
       >
         {chart.ticks.map((tick) => {
           const ty = chart.y(tick)
@@ -134,6 +157,8 @@ export function AreaChart({ data, forecast }) {
             height={chart.innerH}
           />
         )}
+
+        {chart.bandPath && <path className="band" d={chart.bandPath} />}
 
         <path className="area" d={chart.area} />
         <path className="line" d={chart.line} />
@@ -251,8 +276,11 @@ export function AreaChart({ data, forecast }) {
       </svg>
       <div className="chart-foot">
         <span className="chart-legend"><span className="swatch" /> Hourly spend</span>
+        {chart.bandPath && (
+          <span className="chart-legend"><span className="swatch band" /> p10–p90</span>
+        )}
         {chart.forecastPath && (
-          <span className="chart-legend"><span className="swatch dash" /> Model · next 12h</span>
+          <span className="chart-legend"><span className="swatch dash" /> Model median</span>
         )}
         <span className="chart-legend"><span className="swatch peak" /> Peak</span>
         <span style={{ marginLeft: 'auto' }}>Hover for hourly detail</span>

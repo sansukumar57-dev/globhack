@@ -116,6 +116,53 @@ export default function Anomalies({ refreshKey }) {
         )}
       </section>
 
+      {(data.model_scores || []).length > 0 && (
+        <section className="sheet">
+          <div className="sheet-head">
+            <div>
+              <h2 className="sheet-title">Model residual scan</h2>
+              <p className="sheet-sub">Trained expectation head · (actual − expected) / σ over the last 48h</p>
+            </div>
+            <span className="sheet-meta">residual σ = {data.model_sigma}</span>
+          </div>
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th scope="col">When</th>
+                  <th scope="col">Key</th>
+                  <th scope="col" className="r">Hour cost</th>
+                  <th scope="col" className="r">Model expected</th>
+                  <th scope="col" className="r">Residual z</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.model_scores.map((s) => (
+                  <tr key={`${s.vk}-${s.hour}`}>
+                    <td>
+                      <div className="strong">{timeAgo(s.hour)}</div>
+                      <span className="sub">{fmtTs(s.hour)}</span>
+                    </td>
+                    <td>
+                      <div className="key-id">
+                        <span className="key-mark">{monogram(s.key_name || s.vk)}</span>
+                        <div>
+                          <div className="key-name">{s.key_name || s.vk}</div>
+                          <div className="key-team">{s.team}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="r num strong">{fmtUsd(s.actual)}</td>
+                    <td className="r num">{fmtUsd(s.expected)}</td>
+                    <td className="r"><span className="zscore">{s.model_z.toFixed(1)}σ</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
       <section className="sheet">
         <div className="sheet-head">
           <div>
@@ -141,6 +188,15 @@ export default function Anomalies({ refreshKey }) {
               leaked credential. Gradual drift belongs to the forecast layer; this detector is for
               the step change. Flagged buckets are surfaced in the trailing {data.window_days} days
               at z ≥ {data.threshold}.
+            </p>
+          </div>
+          <div>
+            <h3>The trained eye</h3>
+            <p>
+              On top of the statistical pass, the trained expectation head predicts what this key
+              should have spent given its recent shape, then scores the residual in units of its own
+              validation error. Segments the robust z misses — drift that walked into the envelope —
+              show up here first.
             </p>
           </div>
         </div>

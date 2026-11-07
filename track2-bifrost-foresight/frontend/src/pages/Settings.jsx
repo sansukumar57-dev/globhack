@@ -158,7 +158,7 @@ export default function Settings({ refreshKey }) {
                 <h2 className="sheet-title">Forecast model</h2>
                 <p className="sheet-sub">
                   {model?.loaded
-                    ? `Trained ${timeAgo(model.trained_at)} on this gateway's metered history`
+                    ? `Trained ${timeAgo(model.trained_at)} · committee of ${model.committee_size ?? '—'} · 3 heads`
                     : 'Compact forecaster over this gateway’s metered history'}
                 </p>
               </div>
@@ -177,7 +177,8 @@ export default function Settings({ refreshKey }) {
                       {model.val_mae != null ? fmtUsd(model.val_mae) : '—'}<span className="unit">/h</span>
                     </div>
                     <div className="tape-context">
-                      naive weekly same-hour <b>{model.baseline_mae != null ? fmtUsd(model.baseline_mae) : '—'}/h</b>
+                      naive weekly <b>{model.baseline_mae != null ? fmtUsd(model.baseline_mae) : '—'}/h</b> ·
+                      band covers <b>{model.val_coverage != null ? `${Math.round(model.val_coverage * 100)}%` : '—'}</b> of held-out rows
                     </div>
                   </div>
                   <div className="tape-cell">
@@ -191,14 +192,16 @@ export default function Settings({ refreshKey }) {
                     <div className="tape-label">Training rows</div>
                     <div className="tape-value">{model.n_train != null ? model.n_train.toLocaleString() : '—'}</div>
                     <div className="tape-context">
-                      {model.keys?.length ?? 0} keys · {model.hours_covered ?? '—'}h of history
+                      {model.keys?.length ?? 0} keys · {model.hours_covered ?? '—'}h · residual σ {(model.anomaly_resid_sigma ?? 0).toFixed(3)}
                     </div>
                   </div>
                 </div>
                 <p className="field-hint" style={{ marginTop: 12 }}>
-                  Gradient-boosted trees over hour-of-day, day-of-week, per-key spend lags (1h/24h/168h)
-                  and rolling means. The trained artifact drives the <b>dashed next-12h projection</b> on the
-                  Overview chart; governance decisions keep the conservative statistical ETA.
+                  One artifact, three heads: the bootstrap committee draws the <b>dashed next-12h
+                  median</b> and its <b>p10–p90 band</b> on the Overview, the same paths imply each
+                  key's <b>breach probability</b> against its remaining cap, and the deeper
+                  expectation head scores recent hours for spend-vs-expected anomalies on the
+                  Anomalies desk. Governance decisions keep the conservative statistical ETA.
                 </p>
               </div>
             ) : (
