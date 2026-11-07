@@ -28,9 +28,10 @@ def completion_text(response_json: dict[str, Any]) -> str:
     out: list[str] = []
     for choice in response_json.get("choices") or []:
         message = choice.get("message") or {}
-        out.append(str(message.get("content") or ""))
-        if not message:
-            out.append(str(choice.get("text") or ""))
+        if message:
+            out.append(str(message.get("content") or ""))
+        else:
+            out.append(str(choice.get("text") or ""))  # legacy text completions
     return "\n".join(out)
 
 

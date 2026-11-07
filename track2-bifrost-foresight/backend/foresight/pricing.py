@@ -107,6 +107,8 @@ def unit_ratio(from_model: str, to_model: str) -> float:
 def suggest_downgrade(model: str) -> str | None:
     name = strip_provider(model)
     for key, target in DOWNGRADE_MAP.items():
+        if target == name:
+            continue  # a mini family prefix-matches its parent — never downgrade to itself
         if name.startswith(key):
             return target
     return None

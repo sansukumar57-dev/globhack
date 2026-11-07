@@ -8,6 +8,7 @@ backend/__pycache__/
 backend/.pytest_cache/
 **/__pycache__/
 backend/foresight.db-*
+backend/.test_tmp/
 
 # Frontend
 frontend/node_modules/

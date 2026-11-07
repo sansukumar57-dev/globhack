@@ -6,13 +6,17 @@ matching how Bifrost expresses rolling budget windows via reset_duration.
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import threading
 import time
 from pathlib import Path
 from typing import Any
 
-DB_PATH = Path(__file__).resolve().parent.parent / "foresight.db"
+DB_PATH = Path(os.environ.get(
+    "FORESIGHT_DB_PATH",
+    str(Path(__file__).resolve().parent.parent / "foresight.db"),
+))
 
 _lock = threading.Lock()
 
